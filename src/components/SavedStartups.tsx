@@ -5,7 +5,7 @@ import {
   ArrowLeft, Mail, Globe, Box, Linkedin, Facebook, 
   Twitter, Instagram, Trash2, FolderOpen
 } from 'lucide-react';
-import { collection, query, where, orderBy, getDocs, deleteDoc, doc } from 'firebase/firestore';
+import { collection, query, where, getDocs, deleteDoc, doc } from 'firebase/firestore';
 import { db, auth } from '../firebase';
 import { StartupType, SocialLink } from '../types';
 import { format } from 'date-fns';
@@ -287,16 +287,19 @@ const SavedStartups = () => {
       }
 
       try {
+        // Simplified query without orderBy to avoid index issues
         const q = query(
           collection(db, 'selectedStartups'),
-          where('userId', '==', auth.currentUser.uid),
-          orderBy('selectedAt', 'desc')
+          where('userId', '==', auth.currentUser.uid)
         );
         const querySnapshot = await getDocs(q);
         const startups = querySnapshot.docs.map(doc => ({
           id: doc.id,
           ...doc.data()
         })) as SavedStartupType[];
+        
+        // Sort in memory by selectedAt descending
+        startups.sort((a, b) => new Date(b.selectedAt).getTime() - new Date(a.selectedAt).getTime());
         
         setSavedStartups(startups);
       } catch (error) {

@@ -3,9 +3,9 @@ import { useNavigate } from 'react-router-dom';
 import { 
   Star, Calendar, Building2, MapPin, Users, Briefcase, Award, 
   Target, Rocket, ArrowLeft, Mail, Globe, Box, Linkedin,
-  Facebook, Twitter, Instagram, FolderOpen, Plus, Check
+  Facebook, Twitter, Instagram, FolderOpen, Plus, Check, X
 } from 'lucide-react';
-import { collection, query, orderBy, limit, getDocs, addDoc, where } from 'firebase/firestore';
+import { collection, query, orderBy, limit, getDocs, addDoc, where, deleteDoc, doc } from 'firebase/firestore';
 import { db, auth } from '../firebase';
 import { StartupListType, StartupType, SocialLink } from '../types';
 import { format } from 'date-fns';
@@ -155,6 +155,7 @@ const StartupCard = ({
 }) => {
   const [isSaving, setIsSaving] = useState(false);
   const [isSaved, setIsSaved] = useState(false);
+  const [savedDocId, setSavedDocId] = useState<string | null>(null);
 
   useEffect(() => {
     const checkIfSaved = async () => {
@@ -167,7 +168,10 @@ const StartupCard = ({
           where('startupName', '==', startup.name)
         );
         const querySnapshot = await getDocs(q);
-        setIsSaved(!querySnapshot.empty);
+        if (!querySnapshot.empty) {
+          setIsSaved(true);
+          setSavedDocId(querySnapshot.docs[0].id);
+        }
       } catch (error) {
         console.error('Error checking if startup is saved:', error);
       }
@@ -179,25 +183,34 @@ const StartupCard = ({
   const handleSelectStartup = async (e: React.MouseEvent) => {
     e.stopPropagation();
     
-    if (!auth.currentUser || isSaving || isSaved) return;
+    if (!auth.currentUser || isSaving) return;
 
     setIsSaving(true);
 
     try {
-      await addDoc(collection(db, 'selectedStartups'), {
-        userId: auth.currentUser.uid,
-        userEmail: auth.currentUser.email,
-        challengeId,
-        challengeTitle,
-        startupName: startup.name,
-        startupData: startup,
-        selectedAt: new Date().toISOString()
-      });
+      if (isSaved && savedDocId) {
+        // Remove startup
+        await deleteDoc(doc(db, 'selectedStartups', savedDocId));
+        setIsSaved(false);
+        setSavedDocId(null);
+      } else {
+        // Add startup
+        const docRef = await addDoc(collection(db, 'selectedStartups'), {
+          userId: auth.currentUser.uid,
+          userEmail: auth.currentUser.email,
+          challengeId,
+          challengeTitle,
+          startupName: startup.name,
+          startupData: startup,
+          selectedAt: new Date().toISOString()
+        });
+        setIsSaved(true);
+        setSavedDocId(docRef.id);
+      }
 
-      setIsSaved(true);
       onStartupSaved();
     } catch (error) {
-      console.error('Error saving startup:', error);
+      console.error('Error saving/removing startup:', error);
     } finally {
       setIsSaving(false);
     }
@@ -214,10 +227,10 @@ const StartupCard = ({
             <h2 className="text-xl font-bold text-white">{startup.name}</h2>
             <button
               onClick={handleSelectStartup}
-              disabled={isSaving || isSaved}
+              disabled={isSaving}
               className={`flex items-center gap-2 px-3 py-1 rounded-lg text-sm font-medium transition-all ${
                 isSaved
-                  ? 'bg-green-600 text-white cursor-default'
+                  ? 'bg-green-600 hover:bg-red-600 text-white'
                   : isSaving
                   ? 'bg-gray-600 text-gray-300 cursor-not-allowed'
                   : 'bg-blue-600 hover:bg-blue-700 text-white'
@@ -225,7 +238,7 @@ const StartupCard = ({
             >
               {isSaved ? (
                 <>
-                  <Check size={16} />
+                  <X size={16} />
                   Selecionada
                 </>
               ) : isSaving ? (
