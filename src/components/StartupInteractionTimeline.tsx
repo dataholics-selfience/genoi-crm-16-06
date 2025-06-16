@@ -25,6 +25,7 @@ interface StartupInteractionData {
   id: string;
   startupName: string;
   email: string;
+  whatsapp: string;
   website: string;
   linkedin: string;
   description: string;
@@ -88,6 +89,7 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
           id: startupId,
           startupName: startup.name,
           email: startup.email || '',
+          whatsapp: data.whatsapp || '',
           website: startup.website || '',
           linkedin: startup.socialLinks?.linkedin || '',
           description: startup.description || '',
@@ -97,12 +99,12 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
 
         setStartupData(interactionData);
 
-        // Fetch CRM messages
+        // Fetch CRM messages with simplified query to avoid index requirement
+        // First get all messages for this startup and user
         const messagesQuery = query(
           collection(db, 'crmMessages'),
           where('startupId', '==', startupId),
-          where('userId', '==', auth.currentUser.uid),
-          orderBy('sentAt', 'desc')
+          where('userId', '==', auth.currentUser.uid)
         );
 
         const messagesSnapshot = await getDocs(messagesQuery);
@@ -111,7 +113,12 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
           ...doc.data()
         })) as CRMMessage[];
 
-        setCrmMessages(messagesList);
+        // Sort messages by sentAt in JavaScript instead of Firestore
+        const sortedMessages = messagesList.sort((a, b) => 
+          new Date(b.sentAt).getTime() - new Date(a.sentAt).getTime()
+        );
+
+        setCrmMessages(sortedMessages);
       } catch (error) {
         console.error('Error fetching startup data:', error);
       } finally {
@@ -188,6 +195,12 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
   const handleRemoveFounder = async (founderId: string) => {
     if (!auth.currentUser || !startupData) return;
 
+    const founder = startupData.founders.find(f => f.id === founderId);
+    if (founder && founder.name.trim()) {
+      const confirmDelete = window.confirm(`Tem certeza que deseja remover o fundador "${founder.name}"?`);
+      if (!confirmDelete) return;
+    }
+
     const updatedFounders = startupData.founders.filter(founder => founder.id !== founderId);
     const updatedData = { ...startupData, founders: updatedFounders };
     setStartupData(updatedData);
@@ -209,6 +222,20 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
     } else {
       setSelectedRecipientType('founder');
     }
+  };
+
+  const handleContactClick = (contactType: 'email' | 'whatsapp', recipientName: string, recipientType: 'startup' | 'founder') => {
+    setMessageType(contactType);
+    setSelectedRecipient(recipientName);
+    setSelectedRecipientType(recipientType);
+    
+    // Focus on the message textarea
+    setTimeout(() => {
+      const textarea = document.querySelector('textarea[placeholder="Digite sua mensagem..."]') as HTMLTextAreaElement;
+      if (textarea) {
+        textarea.focus();
+      }
+    }, 100);
   };
 
   const handleSendMessage = async () => {
@@ -239,9 +266,18 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
       setSelectedRecipient('');
     } catch (error) {
       console.error('Error sending message:', error);
+      alert('Erro ao enviar mensagem. Tente novamente.');
     } finally {
       setIsSending(false);
     }
+  };
+
+  const canAddFounder = () => {
+    if (!startupData?.founders || startupData.founders.length === 0) return true;
+    
+    // Check if the last founder has at least a name
+    const lastFounder = startupData.founders[startupData.founders.length - 1];
+    return lastFounder.name.trim() !== '';
   };
 
   if (loading) {
@@ -307,12 +343,35 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
                       className="flex-1 px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                     />
                     {startupData.email && (
-                      <a
-                        href={`mailto:${startupData.email}`}
-                        className="p-2 text-blue-400 hover:text-blue-300"
+                      <button
+                        onClick={() => handleContactClick('email', startupData.startupName, 'startup')}
+                        className="p-2 text-blue-400 hover:text-blue-300 hover:bg-gray-700 rounded transition-colors"
+                        title="Enviar email"
                       >
                         <Mail size={16} />
-                      </a>
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-300 mb-1">WhatsApp</label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="tel"
+                      value={startupData.whatsapp}
+                      onChange={(e) => handleUpdateStartupField('whatsapp', e.target.value)}
+                      className="flex-1 px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="+55 11 99999-9999"
+                    />
+                    {startupData.whatsapp && (
+                      <button
+                        onClick={() => handleContactClick('whatsapp', startupData.startupName, 'startup')}
+                        className="p-2 text-green-400 hover:text-green-300 hover:bg-gray-700 rounded transition-colors"
+                        title="Enviar WhatsApp"
+                      >
+                        <Phone size={16} />
+                      </button>
                     )}
                   </div>
                 </div>
@@ -389,7 +448,9 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
                 <h3 className="text-lg font-bold text-white">Fundadores</h3>
                 <button
                   onClick={handleAddFounder}
-                  className="flex items-center gap-1 px-2 py-1 bg-blue-600 hover:bg-blue-700 rounded text-white text-sm"
+                  disabled={!canAddFounder()}
+                  className="flex items-center gap-1 px-2 py-1 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 disabled:cursor-not-allowed rounded text-white text-sm transition-colors"
+                  title={!canAddFounder() ? "Preencha o nome do fundador anterior antes de adicionar um novo" : "Adicionar novo fundador"}
                 >
                   <Plus size={14} />
                   Adicionar
@@ -414,13 +475,14 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
                       </div>
 
                       <div>
-                        <label className="block text-xs text-gray-400 mb-1">Nome</label>
+                        <label className="block text-xs text-gray-400 mb-1">Nome *</label>
                         <input
                           type="text"
                           value={founder.name}
                           onChange={(e) => handleUpdateFounder(founder.id, 'name', e.target.value)}
                           className="w-full px-2 py-1 bg-gray-700 border border-gray-600 rounded text-white text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
                           placeholder="Nome do fundador"
+                          required
                         />
                       </div>
 
@@ -435,12 +497,13 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
                             placeholder="email@exemplo.com"
                           />
                           {founder.email && (
-                            <a
-                              href={`mailto:${founder.email}`}
-                              className="text-blue-400 hover:text-blue-300"
+                            <button
+                              onClick={() => handleContactClick('email', founder.name, 'founder')}
+                              className="text-blue-400 hover:text-blue-300 hover:bg-gray-700 p-1 rounded transition-colors"
+                              title="Enviar email"
                             >
                               <Mail size={14} />
-                            </a>
+                            </button>
                           )}
                         </div>
                       </div>
@@ -456,14 +519,13 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
                             placeholder="+55 11 99999-9999"
                           />
                           {founder.whatsapp && (
-                            <a
-                              href={`https://wa.me/${founder.whatsapp.replace(/\D/g, '')}`}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="text-green-400 hover:text-green-300"
+                            <button
+                              onClick={() => handleContactClick('whatsapp', founder.name, 'founder')}
+                              className="text-green-400 hover:text-green-300 hover:bg-gray-700 p-1 rounded transition-colors"
+                              title="Enviar WhatsApp"
                             >
                               <Phone size={14} />
-                            </a>
+                            </button>
                           )}
                         </div>
                       </div>
@@ -543,7 +605,7 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
                 >
                   <option value="">Selecione o destinatário</option>
                   <option value={startupData.startupName}>{startupData.startupName} (Geral)</option>
-                  {startupData.founders?.map((founder) => (
+                  {startupData.founders?.filter(founder => founder.name.trim()).map((founder) => (
                     <option key={founder.id} value={founder.name}>
                       {founder.name} {founder.cargo && `(${founder.cargo})`}
                     </option>
