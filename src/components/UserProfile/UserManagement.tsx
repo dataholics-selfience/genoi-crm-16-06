@@ -206,9 +206,9 @@ const UserManagement = () => {
           setShowReauthDialog(true);
           return;
         }
-        setError(`Erro ao desativar conta: ${err.message}`);
+        setError(`Erro ao deletar a conta: ${err.message}`);
       } else {
-        setError('Erro ao desativar conta. Por favor, tente novamente.');
+        setError('Erro ao deletar conta. Por favor, tente novamente.');
       }
     } finally {
       setIsDeleting(false);
@@ -336,7 +336,7 @@ const UserManagement = () => {
         {showReauthDialog ? (
           <div className="space-y-4">
             <p className="text-red-400">
-              Por favor, insira sua senha para confirmar a desativação da conta:
+              Por favor, insira sua senha para confirmar a deleção da conta:
             </p>
             <input
               type="password"
@@ -372,12 +372,12 @@ const UserManagement = () => {
             onClick={() => setShowDeleteConfirm(true)}
             className="w-full py-2 bg-red-600 hover:bg-red-700 rounded-md text-white"
           >
-            Desativar conta
+            Apagar conta
           </button>
         ) : (
           <div className="space-y-4">
             <p className="text-red-400">
-              Para confirmar a desativação, digite DELETAR no campo abaixo:
+              Para confirmar a deleção da conta e anonimização dos dados, digite DELETAR no campo abaixo:
             </p>
             <input
               type="text"
@@ -394,7 +394,7 @@ const UserManagement = () => {
                   isDeleting ? 'opacity-50 cursor-not-allowed' : ''
                 }`}
               >
-                {isDeleting ? 'Desativando...' : 'Confirmar Desativação'}
+                {isDeleting ? 'Deletando...' : 'Confirmar Deleção'}
               </button>
               <button
                 onClick={() => {

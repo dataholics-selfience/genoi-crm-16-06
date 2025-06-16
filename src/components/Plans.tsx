@@ -23,7 +23,7 @@ const plans = [
     tokens: 1000,
     price: 600,
     highlight: true,
-    stripeLink: 'https://buy.stripe.com/28o02b9gT77u1XO14r'
+    stripeLink: 'https://buy.stripe.com/9B6cN5dT9gDme7tdzdfYY0o'
   },
   {
     id: 'mestre-jedi',
@@ -33,7 +33,7 @@ const plans = [
     tokens: 3000,
     price: 1800,
     highlight: false,
-    stripeLink: 'https://buy.stripe.com/5kA3en0Kn3Vi7i8eVg'
+    stripeLink: 'https://buy.stripe.com/eVqeVd4iz0Eo0gDan1fYY0p'
   },
   {
     id: 'mestre-yoda',
@@ -43,7 +43,7 @@ const plans = [
     tokens: 11000,
     price: 6000,
     highlight: false,
-    stripeLink: 'https://buy.stripe.com/bIY2ajgJlajGdGw28t'
+    stripeLink: 'https://buy.stripe.com/9B68wP5mD5YI5AXcv9fYY0q'
   }
 ];
 
