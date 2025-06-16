@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Plus, X, FolderClosed, FolderOpen, Rocket, Bookmark } from 'lucide-react';
+import { Plus, X, FolderClosed, FolderOpen, Rocket, BarChart3 } from 'lucide-react';
 import { signOut } from 'firebase/auth';
 import { Link, useNavigate } from 'react-router-dom';
 import { auth, db } from '../firebase';
@@ -113,8 +113,8 @@ const Sidebar = ({ isOpen, toggleSidebar, challenges, currentChallengeId, onSele
               to="/saved-startups"
               className="w-full flex items-center gap-2 text-base font-medium bg-gradient-to-r from-purple-600 to-purple-800 hover:from-purple-700 hover:to-purple-900 text-white p-3 rounded-lg transition-all shadow-lg hover:shadow-xl"
             >
-              <Bookmark size={18} />
-              <span>Startups salvas</span>
+              <BarChart3 size={18} />
+              <span>Pipeline CRM</span>
               {savedStartupsCount > 0 && (
                 <span className="ml-auto bg-purple-500 text-white text-xs px-2 py-1 rounded-full">
                   {savedStartupsCount}

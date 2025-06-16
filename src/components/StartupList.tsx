@@ -156,6 +156,7 @@ const StartupCard = ({
   const [isSaving, setIsSaving] = useState(false);
   const [isSaved, setIsSaved] = useState(false);
   const [savedDocId, setSavedDocId] = useState<string | null>(null);
+  const navigate = useNavigate();
 
   useEffect(() => {
     const checkIfSaved = async () => {
@@ -194,7 +195,7 @@ const StartupCard = ({
         setIsSaved(false);
         setSavedDocId(null);
       } else {
-        // Add startup
+        // Add startup with "mapeada" stage
         const docRef = await addDoc(collection(db, 'selectedStartups'), {
           userId: auth.currentUser.uid,
           userEmail: auth.currentUser.email,
@@ -202,10 +203,15 @@ const StartupCard = ({
           challengeTitle,
           startupName: startup.name,
           startupData: startup,
-          selectedAt: new Date().toISOString()
+          selectedAt: new Date().toISOString(),
+          stage: 'mapeada',
+          updatedAt: new Date().toISOString()
         });
         setIsSaved(true);
         setSavedDocId(docRef.id);
+        
+        // Navigate to saved startups page
+        navigate('/saved-startups');
       }
 
       onStartupSaved();

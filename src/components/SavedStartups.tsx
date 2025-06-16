@@ -3,9 +3,10 @@ import { useNavigate } from 'react-router-dom';
 import { 
   Star, Calendar, Building2, MapPin, Users, Briefcase, 
   ArrowLeft, Mail, Globe, Box, Linkedin, Facebook, 
-  Twitter, Instagram, Trash2, FolderOpen
+  Twitter, Instagram, Trash2, FolderOpen, ChevronRight,
+  ChevronLeft, Plus
 } from 'lucide-react';
-import { collection, query, where, getDocs, deleteDoc, doc } from 'firebase/firestore';
+import { collection, query, where, getDocs, deleteDoc, doc, updateDoc } from 'firebase/firestore';
 import { db, auth } from '../firebase';
 import { StartupType, SocialLink } from '../types';
 import { format } from 'date-fns';
@@ -20,7 +21,17 @@ interface SavedStartupType {
   startupName: string;
   startupData: StartupType;
   selectedAt: string;
+  stage: string;
+  updatedAt: string;
 }
+
+const PIPELINE_STAGES = [
+  { id: 'mapeada', name: 'Mapeada', color: 'bg-yellow-200 text-yellow-800 border-yellow-300' },
+  { id: 'selecionada', name: 'Selecionada', color: 'bg-blue-200 text-blue-800 border-blue-300' },
+  { id: 'contatada', name: 'Contatada', color: 'bg-red-200 text-red-800 border-red-300' },
+  { id: 'entrevistada', name: 'Entrevistada', color: 'bg-green-200 text-green-800 border-green-300' },
+  { id: 'poc', name: 'POC', color: 'bg-orange-200 text-orange-800 border-orange-300' }
+];
 
 const StarRating = ({ rating }: { rating: number }) => {
   return (
@@ -103,16 +114,77 @@ const SocialLinks = ({ startup, className = "" }: { startup: StartupType; classN
   );
 };
 
+const StageSelector = ({ 
+  currentStage, 
+  onStageChange, 
+  disabled = false 
+}: { 
+  currentStage: string; 
+  onStageChange: (stage: string) => void;
+  disabled?: boolean;
+}) => {
+  const currentIndex = PIPELINE_STAGES.findIndex(stage => stage.id === currentStage);
+  
+  const moveToNextStage = () => {
+    if (currentIndex < PIPELINE_STAGES.length - 1) {
+      onStageChange(PIPELINE_STAGES[currentIndex + 1].id);
+    }
+  };
+
+  const moveToPreviousStage = () => {
+    if (currentIndex > 0) {
+      onStageChange(PIPELINE_STAGES[currentIndex - 1].id);
+    }
+  };
+
+  const currentStageData = PIPELINE_STAGES[currentIndex];
+
+  return (
+    <div className="flex items-center gap-2">
+      <button
+        onClick={moveToPreviousStage}
+        disabled={disabled || currentIndex === 0}
+        className={`p-1 rounded ${
+          disabled || currentIndex === 0
+            ? 'text-gray-500 cursor-not-allowed'
+            : 'text-gray-300 hover:text-white hover:bg-gray-700'
+        }`}
+      >
+        <ChevronLeft size={16} />
+      </button>
+      
+      <span className={`px-3 py-1 rounded-full text-sm font-medium border ${currentStageData.color}`}>
+        {currentStageData.name}
+      </span>
+      
+      <button
+        onClick={moveToNextStage}
+        disabled={disabled || currentIndex === PIPELINE_STAGES.length - 1}
+        className={`p-1 rounded ${
+          disabled || currentIndex === PIPELINE_STAGES.length - 1
+            ? 'text-gray-500 cursor-not-allowed'
+            : 'text-gray-300 hover:text-white hover:bg-gray-700'
+        }`}
+      >
+        <ChevronRight size={16} />
+      </button>
+    </div>
+  );
+};
+
 const SavedStartupCard = ({ 
   savedStartup, 
   onClick, 
-  onRemove 
+  onRemove,
+  onStageChange
 }: { 
   savedStartup: SavedStartupType; 
   onClick: () => void;
   onRemove: (id: string) => void;
+  onStageChange: (id: string, newStage: string) => void;
 }) => {
   const [isRemoving, setIsRemoving] = useState(false);
+  const [isUpdatingStage, setIsUpdatingStage] = useState(false);
   const startup = savedStartup.startupData;
 
   const handleRemove = async (e: React.MouseEvent) => {
@@ -129,6 +201,24 @@ const SavedStartupCard = ({
       console.error('Error removing startup:', error);
     } finally {
       setIsRemoving(false);
+    }
+  };
+
+  const handleStageChange = async (newStage: string) => {
+    if (isUpdatingStage) return;
+
+    setIsUpdatingStage(true);
+
+    try {
+      await updateDoc(doc(db, 'selectedStartups', savedStartup.id), {
+        stage: newStage,
+        updatedAt: new Date().toISOString()
+      });
+      onStageChange(savedStartup.id, newStage);
+    } catch (error) {
+      console.error('Error updating stage:', error);
+    } finally {
+      setIsUpdatingStage(false);
     }
   };
 
@@ -172,6 +262,18 @@ const SavedStartupCard = ({
         </div>
         <StarRating rating={startup.rating} />
       </div>
+      
+      <div className="mb-4" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-2">
+          <span className="text-sm text-gray-400">Estágio no Pipeline:</span>
+        </div>
+        <StageSelector
+          currentStage={savedStartup.stage}
+          onStageChange={handleStageChange}
+          disabled={isUpdatingStage}
+        />
+      </div>
+
       <p className="text-gray-400 mb-6">{startup.description}</p>
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-3">
@@ -273,11 +375,40 @@ const StartupDetailCard = ({ startup }: { startup: StartupType }) => {
   );
 };
 
+const PipelineOverview = ({ startups }: { startups: SavedStartupType[] }) => {
+  const stageStats = PIPELINE_STAGES.map(stage => ({
+    ...stage,
+    count: startups.filter(startup => startup.stage === stage.id).length
+  }));
+
+  return (
+    <div className="bg-gray-800 rounded-xl p-6 mb-8">
+      <h3 className="text-xl font-bold text-white mb-4">Pipeline Overview</h3>
+      <div className="grid grid-cols-5 gap-4">
+        {stageStats.map((stage, index) => (
+          <div key={stage.id} className="text-center">
+            <div className={`rounded-lg p-4 border-2 ${stage.color}`}>
+              <div className="text-2xl font-bold">{stage.count}</div>
+              <div className="text-sm font-medium">{stage.name}</div>
+            </div>
+            {index < stageStats.length - 1 && (
+              <div className="flex justify-center mt-2">
+                <ChevronRight size={20} className="text-gray-400" />
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
 const SavedStartups = () => {
   const navigate = useNavigate();
   const [savedStartups, setSavedStartups] = useState<SavedStartupType[]>([]);
   const [selectedStartup, setSelectedStartup] = useState<StartupType | null>(null);
   const [loading, setLoading] = useState(true);
+  const [selectedStage, setSelectedStage] = useState<string>('all');
 
   useEffect(() => {
     const fetchSavedStartups = async () => {
@@ -287,7 +418,6 @@ const SavedStartups = () => {
       }
 
       try {
-        // Simplified query without orderBy to avoid index issues
         const q = query(
           collection(db, 'selectedStartups'),
           where('userId', '==', auth.currentUser.uid)
@@ -298,8 +428,8 @@ const SavedStartups = () => {
           ...doc.data()
         })) as SavedStartupType[];
         
-        // Sort in memory by selectedAt descending
-        startups.sort((a, b) => new Date(b.selectedAt).getTime() - new Date(a.selectedAt).getTime());
+        // Sort in memory by updatedAt descending
+        startups.sort((a, b) => new Date(b.updatedAt || b.selectedAt).getTime() - new Date(a.updatedAt || a.selectedAt).getTime());
         
         setSavedStartups(startups);
       } catch (error) {
@@ -328,10 +458,22 @@ const SavedStartups = () => {
     setSavedStartups(prev => prev.filter(startup => startup.id !== removedId));
   };
 
+  const handleStageChange = (startupId: string, newStage: string) => {
+    setSavedStartups(prev => prev.map(startup => 
+      startup.id === startupId 
+        ? { ...startup, stage: newStage, updatedAt: new Date().toISOString() }
+        : startup
+    ));
+  };
+
+  const filteredStartups = selectedStage === 'all' 
+    ? savedStartups 
+    : savedStartups.filter(startup => startup.stage === selectedStage);
+
   if (loading) {
     return (
       <div className="min-h-screen bg-black flex items-center justify-center">
-        <div className="text-white">Carregando startups salvas...</div>
+        <div className="text-white">Carregando pipeline...</div>
       </div>
     );
   }
@@ -345,7 +487,7 @@ const SavedStartups = () => {
             className="flex items-center text-gray-400 hover:text-white mb-8"
           >
             <ArrowLeft size={20} className="mr-2" />
-            Voltar para startups salvas
+            Voltar para pipeline
           </button>
 
           <StartupDetailCard startup={selectedStartup} />
@@ -366,7 +508,7 @@ const SavedStartups = () => {
           </button>
           <div className="flex items-center gap-2 flex-1 ml-4">
             <FolderOpen size={20} className="text-gray-400" />
-            <h2 className="text-lg font-medium">Startups Salvas</h2>
+            <h2 className="text-lg font-medium">Pipeline CRM</h2>
           </div>
           <span className="text-sm text-gray-400">{savedStartups.length} startup{savedStartups.length !== 1 ? 's' : ''}</span>
         </div>
@@ -377,9 +519,9 @@ const SavedStartups = () => {
           {savedStartups.length === 0 ? (
             <div className="text-center py-16">
               <FolderOpen size={64} className="text-gray-600 mx-auto mb-4" />
-              <h3 className="text-xl font-bold text-white mb-2">Nenhuma startup salva</h3>
+              <h3 className="text-xl font-bold text-white mb-2">Pipeline vazio</h3>
               <p className="text-gray-400 mb-6">
-                Você ainda não salvou nenhuma startup. Explore as listas de startups e salve suas favoritas.
+                Você ainda não tem startups no seu pipeline. Explore as listas de startups e adicione suas favoritas.
               </p>
               <button
                 onClick={() => navigate('/startups')}
@@ -389,16 +531,52 @@ const SavedStartups = () => {
               </button>
             </div>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-              {savedStartups.map((savedStartup) => (
-                <SavedStartupCard
-                  key={savedStartup.id}
-                  savedStartup={savedStartup}
-                  onClick={() => handleStartupClick(savedStartup.startupData)}
-                  onRemove={handleRemoveStartup}
-                />
-              ))}
-            </div>
+            <>
+              <PipelineOverview startups={savedStartups} />
+              
+              <div className="mb-6">
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    onClick={() => setSelectedStage('all')}
+                    className={`px-4 py-2 rounded-lg font-medium transition-colors ${
+                      selectedStage === 'all'
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                    }`}
+                  >
+                    Todas ({savedStartups.length})
+                  </button>
+                  {PIPELINE_STAGES.map(stage => {
+                    const count = savedStartups.filter(startup => startup.stage === stage.id).length;
+                    return (
+                      <button
+                        key={stage.id}
+                        onClick={() => setSelectedStage(stage.id)}
+                        className={`px-4 py-2 rounded-lg font-medium transition-colors border ${
+                          selectedStage === stage.id
+                            ? stage.color
+                            : 'bg-gray-700 text-gray-300 hover:bg-gray-600 border-gray-600'
+                        }`}
+                      >
+                        {stage.name} ({count})
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                {filteredStartups.map((savedStartup) => (
+                  <SavedStartupCard
+                    key={savedStartup.id}
+                    savedStartup={savedStartup}
+                    onClick={() => handleStartupClick(savedStartup.startupData)}
+                    onRemove={handleRemoveStartup}
+                    onStageChange={handleStageChange}
+                  />
+                ))}
+              </div>
+            </>
           )}
         </div>
       </div>
