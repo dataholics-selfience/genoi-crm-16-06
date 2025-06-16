@@ -11,6 +11,7 @@ import { db, auth } from '../firebase';
 import { StartupType, SocialLink } from '../types';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
+import StartupInteractionTimeline from './StartupInteractionTimeline';
 
 interface SavedStartupType {
   id: string;
@@ -147,12 +148,17 @@ const DraggableStartupCard = ({
     e.dataTransfer.effectAllowed = 'move';
   };
 
+  const handleCardClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    onClick();
+  };
+
   return (
     <div
       draggable
       onDragStart={handleDragStart}
-      onClick={onClick}
-      className="bg-gray-700 rounded-lg p-3 mb-2 cursor-move hover:bg-gray-600 transition-colors group"
+      onClick={handleCardClick}
+      className="bg-gray-700 rounded-lg p-3 mb-2 cursor-pointer hover:bg-gray-600 transition-colors group"
     >
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2 flex-1">
@@ -185,7 +191,7 @@ const PipelineStage = ({
   stage: typeof PIPELINE_STAGES[0];
   startups: SavedStartupType[];
   onDrop: (startupId: string, newStage: string) => void;
-  onStartupClick: (startup: StartupType) => void;
+  onStartupClick: (startupId: string) => void;
   onRemoveStartup: (id: string) => void;
 }) => {
   const [isDragOver, setIsDragOver] = useState(false);
@@ -243,7 +249,7 @@ const PipelineStage = ({
               key={startup.id}
               startup={startup}
               onRemove={onRemoveStartup}
-              onClick={() => onStartupClick(startup.startupData)}
+              onClick={() => onStartupClick(startup.id)}
             />
           ))
         )}
@@ -260,7 +266,7 @@ const PipelineBoard = ({
 }: { 
   startups: SavedStartupType[];
   onStageChange: (startupId: string, newStage: string) => void;
-  onStartupClick: (startup: StartupType) => void;
+  onStartupClick: (startupId: string) => void;
   onRemoveStartup: (id: string) => void;
 }) => {
   const handleDrop = async (startupId: string, newStage: string) => {
@@ -356,6 +362,7 @@ const SavedStartups = () => {
   const navigate = useNavigate();
   const [savedStartups, setSavedStartups] = useState<SavedStartupType[]>([]);
   const [selectedStartup, setSelectedStartup] = useState<StartupType | null>(null);
+  const [selectedStartupId, setSelectedStartupId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -394,8 +401,14 @@ const SavedStartups = () => {
     setSelectedStartup(startup);
   };
 
+  const handleStartupInteractionClick = (startupId: string) => {
+    setSelectedStartupId(startupId);
+  };
+
   const handleBack = () => {
-    if (selectedStartup) {
+    if (selectedStartupId) {
+      setSelectedStartupId(null);
+    } else if (selectedStartup) {
       setSelectedStartup(null);
     } else {
       navigate(-1);
@@ -422,6 +435,17 @@ const SavedStartups = () => {
     );
   }
 
+  // Show interaction timeline
+  if (selectedStartupId) {
+    return (
+      <StartupInteractionTimeline
+        startupId={selectedStartupId}
+        onBack={handleBack}
+      />
+    );
+  }
+
+  // Show startup detail card
   if (selectedStartup) {
     return (
       <div className="min-h-screen bg-black p-8">
@@ -496,7 +520,7 @@ const SavedStartups = () => {
               <PipelineBoard
                 startups={savedStartups}
                 onStageChange={handleStageChange}
-                onStartupClick={handleStartupClick}
+                onStartupClick={handleStartupInteractionClick}
                 onRemoveStartup={handleRemoveStartup}
               />
             </>
