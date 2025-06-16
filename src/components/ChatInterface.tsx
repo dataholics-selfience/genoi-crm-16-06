@@ -569,5 +569,3 @@ const StartupListIcons = ({ challengeId }: { challengeId?: string }) => {
 };
 
 export default ChatInterface;
-
-export default ChatInterface
