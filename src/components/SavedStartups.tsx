@@ -124,28 +124,30 @@ const StageSelector = ({
   disabled?: boolean;
 }) => {
   const currentIndex = PIPELINE_STAGES.findIndex(stage => stage.id === currentStage);
+  // If stage not found, default to first stage (mapeada)
+  const safeCurrentIndex = currentIndex === -1 ? 0 : currentIndex;
   
   const moveToNextStage = () => {
-    if (currentIndex < PIPELINE_STAGES.length - 1) {
-      onStageChange(PIPELINE_STAGES[currentIndex + 1].id);
+    if (safeCurrentIndex < PIPELINE_STAGES.length - 1) {
+      onStageChange(PIPELINE_STAGES[safeCurrentIndex + 1].id);
     }
   };
 
   const moveToPreviousStage = () => {
-    if (currentIndex > 0) {
-      onStageChange(PIPELINE_STAGES[currentIndex - 1].id);
+    if (safeCurrentIndex > 0) {
+      onStageChange(PIPELINE_STAGES[safeCurrentIndex - 1].id);
     }
   };
 
-  const currentStageData = PIPELINE_STAGES[currentIndex];
+  const currentStageData = PIPELINE_STAGES[safeCurrentIndex];
 
   return (
     <div className="flex items-center gap-2">
       <button
         onClick={moveToPreviousStage}
-        disabled={disabled || currentIndex === 0}
+        disabled={disabled || safeCurrentIndex === 0}
         className={`p-1 rounded ${
-          disabled || currentIndex === 0
+          disabled || safeCurrentIndex === 0
             ? 'text-gray-500 cursor-not-allowed'
             : 'text-gray-300 hover:text-white hover:bg-gray-700'
         }`}
@@ -159,9 +161,9 @@ const StageSelector = ({
       
       <button
         onClick={moveToNextStage}
-        disabled={disabled || currentIndex === PIPELINE_STAGES.length - 1}
+        disabled={disabled || safeCurrentIndex === PIPELINE_STAGES.length - 1}
         className={`p-1 rounded ${
-          disabled || currentIndex === PIPELINE_STAGES.length - 1
+          disabled || safeCurrentIndex === PIPELINE_STAGES.length - 1
             ? 'text-gray-500 cursor-not-allowed'
             : 'text-gray-300 hover:text-white hover:bg-gray-700'
         }`}
