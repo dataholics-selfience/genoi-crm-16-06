@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { 
   ArrowLeft, Mail, Globe, Linkedin, Phone, User, Building2, 
   Calendar, Edit3, Save, X, Plus, Send, MessageSquare, 
-  ExternalLink, Users, Briefcase
+  ExternalLink, Users, Briefcase, ChevronLeft, ChevronRight
 } from 'lucide-react';
 import { 
   doc, 
@@ -31,6 +31,7 @@ interface StartupInteractionData {
   description: string;
   founders: FounderData[];
   startupData: StartupType;
+  stage: string;
 }
 
 interface FounderData {
@@ -58,16 +59,214 @@ interface StartupInteractionTimelineProps {
   onBack: () => void;
 }
 
-const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTimelineProps) => {
-  const navigate = useNavigate();
-  const [startupData, setStartupData] = useState<StartupInteractionData | null>(null);
-  const [crmMessages, setCrmMessages] = useState<CRMMessage[]>([]);
+const PIPELINE_STAGES = [
+  { id: 'mapeada', name: 'Mapeada', color: 'bg-yellow-200 text-yellow-800 border-yellow-300' },
+  { id: 'selecionada', name: 'Selecionada', color: 'bg-blue-200 text-blue-800 border-blue-300' },
+  { id: 'contatada', name: 'Contatada', color: 'bg-red-200 text-red-800 border-red-300' },
+  { id: 'entrevistada', name: 'Entrevistada', color: 'bg-green-200 text-green-800 border-green-300' },
+  { id: 'poc', name: 'POC', color: 'bg-orange-200 text-orange-800 border-orange-300' }
+];
+
+const NewMessageModal = ({ 
+  isOpen, 
+  onClose, 
+  startupData, 
+  onMessageSent 
+}: {
+  isOpen: boolean;
+  onClose: () => void;
+  startupData: StartupInteractionData;
+  onMessageSent: (message: CRMMessage) => void;
+}) => {
   const [newMessage, setNewMessage] = useState('');
   const [messageType, setMessageType] = useState<'email' | 'whatsapp'>('email');
   const [selectedRecipient, setSelectedRecipient] = useState('');
   const [selectedRecipientType, setSelectedRecipientType] = useState<'startup' | 'founder'>('startup');
-  const [loading, setLoading] = useState(true);
   const [isSending, setIsSending] = useState(false);
+
+  const handleRecipientChange = (value: string) => {
+    setSelectedRecipient(value);
+    if (value === startupData?.startupName) {
+      setSelectedRecipientType('startup');
+    } else {
+      setSelectedRecipientType('founder');
+    }
+  };
+
+  const handleSendMessage = async () => {
+    if (!auth.currentUser || !startupData || !newMessage.trim() || !selectedRecipient) return;
+
+    setIsSending(true);
+
+    try {
+      const messageData: Omit<CRMMessage, 'id'> = {
+        startupId: startupData.id,
+        userId: auth.currentUser.uid,
+        type: messageType,
+        content: newMessage.trim(),
+        sentAt: new Date().toISOString(),
+        recipientName: selectedRecipient,
+        recipientType: selectedRecipientType
+      };
+
+      const docRef = await addDoc(collection(db, 'crmMessages'), messageData);
+      
+      const newCrmMessage: CRMMessage = {
+        id: docRef.id,
+        ...messageData
+      };
+
+      onMessageSent(newCrmMessage);
+      setNewMessage('');
+      setSelectedRecipient('');
+      onClose();
+    } catch (error) {
+      console.error('Error sending message:', error);
+      alert('Erro ao enviar mensagem. Tente novamente.');
+    } finally {
+      setIsSending(false);
+    }
+  };
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+      <div className="bg-gray-800 rounded-lg p-6 w-full max-w-md mx-4">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-bold text-white">Nova Mensagem</h3>
+          <button
+            onClick={onClose}
+            className="text-gray-400 hover:text-white"
+          >
+            <X size={20} />
+          </button>
+        </div>
+        
+        <div className="space-y-4">
+          <div className="flex gap-2">
+            <select
+              value={messageType}
+              onChange={(e) => setMessageType(e.target.value as 'email' | 'whatsapp')}
+              className="px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="email">Email</option>
+              <option value="whatsapp">WhatsApp</option>
+            </select>
+
+            <select
+              value={selectedRecipient}
+              onChange={(e) => handleRecipientChange(e.target.value)}
+              className="flex-1 px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="">Selecione o destinatário</option>
+              <option value={startupData.startupName}>{startupData.startupName} (Geral)</option>
+              {startupData.founders?.filter(founder => founder.name.trim()).map((founder) => (
+                <option key={founder.id} value={founder.name}>
+                  {founder.name} {founder.cargo && `(${founder.cargo})`}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <textarea
+            value={newMessage}
+            onChange={(e) => setNewMessage(e.target.value)}
+            placeholder="Digite sua mensagem..."
+            rows={4}
+            className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+
+          <div className="flex gap-2">
+            <button
+              onClick={handleSendMessage}
+              disabled={!newMessage.trim() || !selectedRecipient || isSending}
+              className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg text-white font-medium"
+            >
+              {isSending ? (
+                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+              ) : (
+                <Send size={16} />
+              )}
+              {isSending ? 'Enviando...' : 'Enviar Mensagem'}
+            </button>
+            <button
+              onClick={onClose}
+              className="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-white font-medium"
+            >
+              Cancelar
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const StageNavigator = ({ 
+  currentStage, 
+  onStageChange 
+}: { 
+  currentStage: string; 
+  onStageChange: (newStage: string) => void; 
+}) => {
+  const currentIndex = PIPELINE_STAGES.findIndex(stage => stage.id === currentStage);
+  const currentStageData = PIPELINE_STAGES[currentIndex];
+  
+  const canMovePrevious = currentIndex > 0;
+  const canMoveNext = currentIndex < PIPELINE_STAGES.length - 1;
+
+  const handlePrevious = () => {
+    if (canMovePrevious) {
+      onStageChange(PIPELINE_STAGES[currentIndex - 1].id);
+    }
+  };
+
+  const handleNext = () => {
+    if (canMoveNext) {
+      onStageChange(PIPELINE_STAGES[currentIndex + 1].id);
+    }
+  };
+
+  return (
+    <div className="flex items-center gap-2">
+      <button
+        onClick={handlePrevious}
+        disabled={!canMovePrevious}
+        className={`p-1 rounded ${
+          canMovePrevious 
+            ? 'text-gray-400 hover:text-white hover:bg-gray-700' 
+            : 'text-gray-600 cursor-not-allowed'
+        }`}
+      >
+        <ChevronLeft size={16} />
+      </button>
+      
+      <span className={`px-2 py-1 rounded text-xs font-medium border ${currentStageData?.color || 'bg-gray-200 text-gray-800'}`}>
+        {currentStageData?.name || currentStage}
+      </span>
+      
+      <button
+        onClick={handleNext}
+        disabled={!canMoveNext}
+        className={`p-1 rounded ${
+          canMoveNext 
+            ? 'text-gray-400 hover:text-white hover:bg-gray-700' 
+            : 'text-gray-600 cursor-not-allowed'
+        }`}
+      >
+        <ChevronRight size={16} />
+      </button>
+    </div>
+  );
+};
+
+const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTimelineProps) => {
+  const navigate = useNavigate();
+  const [startupData, setStartupData] = useState<StartupInteractionData | null>(null);
+  const [crmMessages, setCrmMessages] = useState<CRMMessage[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [showNewMessageModal, setShowNewMessageModal] = useState(false);
 
   useEffect(() => {
     const fetchStartupData = async () => {
@@ -94,13 +293,13 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
           linkedin: data.linkedin || startup.socialLinks?.linkedin || '',
           description: startup.description || '',
           founders: data.founders || [],
-          startupData: startup
+          startupData: startup,
+          stage: data.stage || 'mapeada'
         };
 
         setStartupData(interactionData);
 
-        // Fetch CRM messages with simplified query to avoid index requirement
-        // First get all messages for this startup and user
+        // Fetch CRM messages
         const messagesQuery = query(
           collection(db, 'crmMessages'),
           where('startupId', '==', startupId),
@@ -170,6 +369,21 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
   const handleFieldBlur = (field: keyof StartupInteractionData, value: string) => {
     // Persist data when field loses focus
     handleUpdateStartupField(field, value);
+  };
+
+  const handleStageChange = async (newStage: string) => {
+    if (!auth.currentUser || !startupData) return;
+
+    try {
+      await updateDoc(doc(db, 'selectedStartups', startupId), {
+        stage: newStage,
+        updatedAt: new Date().toISOString()
+      });
+
+      setStartupData(prev => prev ? { ...prev, stage: newStage } : null);
+    } catch (error) {
+      console.error('Error updating stage:', error);
+    }
   };
 
   const handleAddFounder = async () => {
@@ -246,61 +460,12 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
     }
   };
 
-  const handleRecipientChange = (value: string) => {
-    setSelectedRecipient(value);
-    if (value === startupData?.startupName) {
-      setSelectedRecipientType('startup');
-    } else {
-      setSelectedRecipientType('founder');
-    }
-  };
-
   const handleContactClick = (contactType: 'email' | 'whatsapp', recipientName: string, recipientType: 'startup' | 'founder') => {
-    setMessageType(contactType);
-    setSelectedRecipient(recipientName);
-    setSelectedRecipientType(recipientType);
-    
-    // Focus on the message textarea
-    setTimeout(() => {
-      const textarea = document.querySelector('textarea[placeholder="Digite sua mensagem..."]') as HTMLTextAreaElement;
-      if (textarea) {
-        textarea.focus();
-      }
-    }, 100);
+    setShowNewMessageModal(true);
   };
 
-  const handleSendMessage = async () => {
-    if (!auth.currentUser || !startupData || !newMessage.trim() || !selectedRecipient) return;
-
-    setIsSending(true);
-
-    try {
-      const messageData: Omit<CRMMessage, 'id'> = {
-        startupId,
-        userId: auth.currentUser.uid,
-        type: messageType,
-        content: newMessage.trim(),
-        sentAt: new Date().toISOString(),
-        recipientName: selectedRecipient,
-        recipientType: selectedRecipientType
-      };
-
-      const docRef = await addDoc(collection(db, 'crmMessages'), messageData);
-      
-      const newCrmMessage: CRMMessage = {
-        id: docRef.id,
-        ...messageData
-      };
-
-      setCrmMessages(prev => [newCrmMessage, ...prev]);
-      setNewMessage('');
-      setSelectedRecipient('');
-    } catch (error) {
-      console.error('Error sending message:', error);
-      alert('Erro ao enviar mensagem. Tente novamente.');
-    } finally {
-      setIsSending(false);
-    }
+  const handleMessageSent = (newMessage: CRMMessage) => {
+    setCrmMessages(prev => [newMessage, ...prev]);
   };
 
   const canAddFounder = () => {
@@ -338,16 +503,20 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
           >
             <ArrowLeft size={20} />
           </button>
-          <div className="flex items-center gap-2 flex-1 ml-4">
+          <div className="flex items-center gap-4 flex-1 ml-4">
             <Building2 size={20} className="text-gray-400" />
             <h2 className="text-lg font-medium">{startupData.startupName}</h2>
+            <StageNavigator 
+              currentStage={startupData.stage} 
+              onStageChange={handleStageChange}
+            />
           </div>
         </div>
       </div>
 
       <div className="flex h-[calc(100vh-80px)]">
-        {/* Left Panel - Startup Data */}
-        <div className="w-1/2 p-6 border-r border-gray-700 overflow-y-auto custom-scrollbar">
+        {/* Left Panel - Startup Data (35% width) */}
+        <div className="w-[35%] p-6 border-r border-gray-700 overflow-y-auto custom-scrollbar">
           <div className="space-y-6">
             {/* Basic Info */}
             <div className="bg-gray-800 rounded-lg p-4">
@@ -648,65 +817,24 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
           </div>
         </div>
 
-        {/* Right Panel - Interaction Timeline */}
-        <div className="w-1/2 flex flex-col">
-          {/* Message Input */}
+        {/* Right Panel - Timeline (65% width) */}
+        <div className="w-[65%] flex flex-col">
+          {/* Timeline Header */}
           <div className="p-4 border-b border-gray-700">
-            <h3 className="text-lg font-bold text-white mb-4">Nova Interação</h3>
-            
-            <div className="space-y-3">
-              <div className="flex gap-2">
-                <select
-                  value={messageType}
-                  onChange={(e) => setMessageType(e.target.value as 'email' | 'whatsapp')}
-                  className="px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  <option value="email">Email</option>
-                  <option value="whatsapp">WhatsApp</option>
-                </select>
-
-                <select
-                  value={selectedRecipient}
-                  onChange={(e) => handleRecipientChange(e.target.value)}
-                  className="flex-1 px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  <option value="">Selecione o destinatário</option>
-                  <option value={startupData.startupName}>{startupData.startupName} (Geral)</option>
-                  {startupData.founders?.filter(founder => founder.name.trim()).map((founder) => (
-                    <option key={founder.id} value={founder.name}>
-                      {founder.name} {founder.cargo && `(${founder.cargo})`}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <textarea
-                value={newMessage}
-                onChange={(e) => setNewMessage(e.target.value)}
-                placeholder="Digite sua mensagem..."
-                rows={3}
-                className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-bold text-white">Timeline de Interações</h3>
               <button
-                onClick={handleSendMessage}
-                disabled={!newMessage.trim() || !selectedRecipient || isSending}
-                className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg text-white font-medium"
+                onClick={() => setShowNewMessageModal(true)}
+                className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg text-white font-medium transition-colors"
               >
-                {isSending ? (
-                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                ) : (
-                  <Send size={16} />
-                )}
-                {isSending ? 'Enviando...' : 'Enviar Mensagem'}
+                <Plus size={16} />
+                Nova Mensagem
               </button>
             </div>
           </div>
 
-          {/* Timeline */}
+          {/* Timeline Content */}
           <div className="flex-1 p-4 overflow-y-auto custom-scrollbar">
-            <h3 className="text-lg font-bold text-white mb-4">Timeline de Interações</h3>
-            
             <div className="space-y-4">
               {crmMessages.length === 0 ? (
                 <div className="text-center py-8 text-gray-500">
@@ -745,6 +873,14 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
           </div>
         </div>
       </div>
+
+      {/* New Message Modal */}
+      <NewMessageModal
+        isOpen={showNewMessageModal}
+        onClose={() => setShowNewMessageModal(false)}
+        startupData={startupData}
+        onMessageSent={handleMessageSent}
+      />
     </div>
   );
 };
