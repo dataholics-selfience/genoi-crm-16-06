@@ -84,14 +84,14 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
         const data = startupDoc.data();
         const startup = data.startupData as StartupType;
 
-        // Initialize startup interaction data
+        // Initialize startup interaction data with persisted values or defaults
         const interactionData: StartupInteractionData = {
           id: startupId,
           startupName: startup.name,
-          email: startup.email || '',
+          email: data.email || startup.email || '',
           whatsapp: data.whatsapp || '',
-          website: startup.website || '',
-          linkedin: startup.socialLinks?.linkedin || '',
+          website: data.website || startup.website || '',
+          linkedin: data.linkedin || startup.socialLinks?.linkedin || '',
           description: startup.description || '',
           founders: data.founders || [],
           startupData: startup
@@ -136,14 +136,40 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
       const updatedData = { ...startupData, [field]: value };
       setStartupData(updatedData);
 
-      // Update the selectedStartups document
-      await updateDoc(doc(db, 'selectedStartups', startupId), {
+      // Update the selectedStartups document with the new field value
+      const updateData: any = {
         [field]: value,
         updatedAt: new Date().toISOString()
-      });
+      };
+
+      // Also update the startupData nested object for certain fields
+      if (field === 'email' || field === 'website' || field === 'linkedin') {
+        const updatedStartupData = { ...startupData.startupData };
+        
+        if (field === 'email') {
+          updatedStartupData.email = value;
+        } else if (field === 'website') {
+          updatedStartupData.website = value;
+        } else if (field === 'linkedin') {
+          if (!updatedStartupData.socialLinks) {
+            updatedStartupData.socialLinks = {};
+          }
+          updatedStartupData.socialLinks.linkedin = value;
+        }
+        
+        updateData.startupData = updatedStartupData;
+        setStartupData(prev => prev ? { ...prev, startupData: updatedStartupData } : null);
+      }
+
+      await updateDoc(doc(db, 'selectedStartups', startupId), updateData);
     } catch (error) {
       console.error('Error updating startup field:', error);
     }
+  };
+
+  const handleFieldBlur = (field: keyof StartupInteractionData, value: string) => {
+    // Persist data when field loses focus
+    handleUpdateStartupField(field, value);
   };
 
   const handleAddFounder = async () => {
@@ -190,6 +216,11 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
     } catch (error) {
       console.error('Error updating founder:', error);
     }
+  };
+
+  const handleFounderFieldBlur = (founderId: string, field: keyof FounderData, value: string) => {
+    // Persist founder data when field loses focus
+    handleUpdateFounder(founderId, field, value);
   };
 
   const handleRemoveFounder = async (founderId: string) => {
@@ -328,8 +359,9 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
                   <input
                     type="text"
                     value={startupData.startupName}
-                    onChange={(e) => handleUpdateStartupField('startupName', e.target.value)}
-                    className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    readOnly
+                    className="w-full px-3 py-2 bg-gray-600 border border-gray-500 rounded text-gray-300 cursor-not-allowed opacity-75"
+                    title="Este campo não pode ser editado"
                   />
                 </div>
 
@@ -339,7 +371,8 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
                     <input
                       type="email"
                       value={startupData.email}
-                      onChange={(e) => handleUpdateStartupField('email', e.target.value)}
+                      onChange={(e) => setStartupData(prev => prev ? { ...prev, email: e.target.value } : null)}
+                      onBlur={(e) => handleFieldBlur('email', e.target.value)}
                       className="flex-1 px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                     />
                     {startupData.email && (
@@ -360,7 +393,8 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
                     <input
                       type="tel"
                       value={startupData.whatsapp}
-                      onChange={(e) => handleUpdateStartupField('whatsapp', e.target.value)}
+                      onChange={(e) => setStartupData(prev => prev ? { ...prev, whatsapp: e.target.value } : null)}
+                      onBlur={(e) => handleFieldBlur('whatsapp', e.target.value)}
                       className="flex-1 px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                       placeholder="+55 11 99999-9999"
                     />
@@ -382,7 +416,8 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
                     <input
                       type="url"
                       value={startupData.website}
-                      onChange={(e) => handleUpdateStartupField('website', e.target.value)}
+                      onChange={(e) => setStartupData(prev => prev ? { ...prev, website: e.target.value } : null)}
+                      onBlur={(e) => handleFieldBlur('website', e.target.value)}
                       className="flex-1 px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                     />
                     {startupData.website && (
@@ -404,7 +439,8 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
                     <input
                       type="url"
                       value={startupData.linkedin}
-                      onChange={(e) => handleUpdateStartupField('linkedin', e.target.value)}
+                      onChange={(e) => setStartupData(prev => prev ? { ...prev, linkedin: e.target.value } : null)}
+                      onBlur={(e) => handleFieldBlur('linkedin', e.target.value)}
                       className="flex-1 px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                     />
                     {startupData.linkedin && (
@@ -424,9 +460,10 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
                   <label className="block text-sm font-medium text-gray-300 mb-1">Descrição</label>
                   <textarea
                     value={startupData.description}
-                    onChange={(e) => handleUpdateStartupField('description', e.target.value)}
+                    readOnly
                     rows={3}
-                    className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full px-3 py-2 bg-gray-600 border border-gray-500 rounded text-gray-300 resize-none cursor-not-allowed opacity-75"
+                    title="Este campo não pode ser editado"
                   />
                 </div>
 
@@ -479,7 +516,13 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
                         <input
                           type="text"
                           value={founder.name}
-                          onChange={(e) => handleUpdateFounder(founder.id, 'name', e.target.value)}
+                          onChange={(e) => {
+                            const updatedFounders = startupData.founders.map(f =>
+                              f.id === founder.id ? { ...f, name: e.target.value } : f
+                            );
+                            setStartupData(prev => prev ? { ...prev, founders: updatedFounders } : null);
+                          }}
+                          onBlur={(e) => handleFounderFieldBlur(founder.id, 'name', e.target.value)}
                           className="w-full px-2 py-1 bg-gray-700 border border-gray-600 rounded text-white text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
                           placeholder="Nome do fundador"
                           required
@@ -492,7 +535,13 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
                           <input
                             type="email"
                             value={founder.email}
-                            onChange={(e) => handleUpdateFounder(founder.id, 'email', e.target.value)}
+                            onChange={(e) => {
+                              const updatedFounders = startupData.founders.map(f =>
+                                f.id === founder.id ? { ...f, email: e.target.value } : f
+                              );
+                              setStartupData(prev => prev ? { ...prev, founders: updatedFounders } : null);
+                            }}
+                            onBlur={(e) => handleFounderFieldBlur(founder.id, 'email', e.target.value)}
                             className="flex-1 px-2 py-1 bg-gray-700 border border-gray-600 rounded text-white text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
                             placeholder="email@exemplo.com"
                           />
@@ -514,7 +563,13 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
                           <input
                             type="tel"
                             value={founder.whatsapp}
-                            onChange={(e) => handleUpdateFounder(founder.id, 'whatsapp', e.target.value)}
+                            onChange={(e) => {
+                              const updatedFounders = startupData.founders.map(f =>
+                                f.id === founder.id ? { ...f, whatsapp: e.target.value } : f
+                              );
+                              setStartupData(prev => prev ? { ...prev, founders: updatedFounders } : null);
+                            }}
+                            onBlur={(e) => handleFounderFieldBlur(founder.id, 'whatsapp', e.target.value)}
                             className="flex-1 px-2 py-1 bg-gray-700 border border-gray-600 rounded text-white text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
                             placeholder="+55 11 99999-9999"
                           />
@@ -536,7 +591,13 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
                           <input
                             type="url"
                             value={founder.linkedin}
-                            onChange={(e) => handleUpdateFounder(founder.id, 'linkedin', e.target.value)}
+                            onChange={(e) => {
+                              const updatedFounders = startupData.founders.map(f =>
+                                f.id === founder.id ? { ...f, linkedin: e.target.value } : f
+                              );
+                              setStartupData(prev => prev ? { ...prev, founders: updatedFounders } : null);
+                            }}
+                            onBlur={(e) => handleFounderFieldBlur(founder.id, 'linkedin', e.target.value)}
                             className="flex-1 px-2 py-1 bg-gray-700 border border-gray-600 rounded text-white text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
                             placeholder="https://linkedin.com/in/..."
                           />
@@ -560,7 +621,13 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
                           <input
                             type="text"
                             value={founder.cargo}
-                            onChange={(e) => handleUpdateFounder(founder.id, 'cargo', e.target.value)}
+                            onChange={(e) => {
+                              const updatedFounders = startupData.founders.map(f =>
+                                f.id === founder.id ? { ...f, cargo: e.target.value } : f
+                              );
+                              setStartupData(prev => prev ? { ...prev, founders: updatedFounders } : null);
+                            }}
+                            onBlur={(e) => handleFounderFieldBlur(founder.id, 'cargo', e.target.value)}
                             className="flex-1 px-2 py-1 bg-gray-700 border border-gray-600 rounded text-white text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
                             placeholder="CEO, CTO, Fundador..."
                           />
