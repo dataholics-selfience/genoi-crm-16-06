@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { 
   ArrowLeft, Mail, Globe, Linkedin, Phone, User, Building2, 
   Calendar, Edit3, Save, X, Plus, Send, MessageSquare, 
-  ExternalLink, Users
+  ExternalLink, Users, Briefcase
 } from 'lucide-react';
 import { 
   doc, 
@@ -35,11 +35,13 @@ interface StartupInteractionData {
 interface FounderData {
   id: string;
   name: string;
-  linkedin: string;
+  email: string;
   whatsapp: string;
+  linkedin: string;
+  cargo: string;
 }
 
-interface InteractionMessage {
+interface CRMMessage {
   id: string;
   startupId: string;
   userId: string;
@@ -47,6 +49,7 @@ interface InteractionMessage {
   content: string;
   sentAt: string;
   recipientName?: string;
+  recipientType: 'startup' | 'founder';
 }
 
 interface StartupInteractionTimelineProps {
@@ -57,12 +60,11 @@ interface StartupInteractionTimelineProps {
 const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTimelineProps) => {
   const navigate = useNavigate();
   const [startupData, setStartupData] = useState<StartupInteractionData | null>(null);
-  const [interactions, setInteractions] = useState<InteractionMessage[]>([]);
-  const [isEditing, setIsEditing] = useState(false);
-  const [editData, setEditData] = useState<Partial<StartupInteractionData>>({});
+  const [crmMessages, setCrmMessages] = useState<CRMMessage[]>([]);
   const [newMessage, setNewMessage] = useState('');
   const [messageType, setMessageType] = useState<'email' | 'whatsapp'>('email');
   const [selectedRecipient, setSelectedRecipient] = useState('');
+  const [selectedRecipientType, setSelectedRecipientType] = useState<'startup' | 'founder'>('startup');
   const [loading, setLoading] = useState(true);
   const [isSending, setIsSending] = useState(false);
 
@@ -94,23 +96,22 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
         };
 
         setStartupData(interactionData);
-        setEditData(interactionData);
 
-        // Fetch interactions
-        const interactionsQuery = query(
-          collection(db, 'startupInteractions'),
+        // Fetch CRM messages
+        const messagesQuery = query(
+          collection(db, 'crmMessages'),
           where('startupId', '==', startupId),
           where('userId', '==', auth.currentUser.uid),
           orderBy('sentAt', 'desc')
         );
 
-        const interactionsSnapshot = await getDocs(interactionsQuery);
-        const interactionsList = interactionsSnapshot.docs.map(doc => ({
+        const messagesSnapshot = await getDocs(messagesQuery);
+        const messagesList = messagesSnapshot.docs.map(doc => ({
           id: doc.id,
           ...doc.data()
-        })) as InteractionMessage[];
+        })) as CRMMessage[];
 
-        setInteractions(interactionsList);
+        setCrmMessages(messagesList);
       } catch (error) {
         console.error('Error fetching startup data:', error);
       } finally {
@@ -121,76 +122,119 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
     fetchStartupData();
   }, [startupId]);
 
-  const handleSaveEdit = async () => {
+  const handleUpdateStartupField = async (field: keyof StartupInteractionData, value: string) => {
     if (!auth.currentUser || !startupData) return;
 
     try {
-      // Update the selectedStartups document with new data
+      const updatedData = { ...startupData, [field]: value };
+      setStartupData(updatedData);
+
+      // Update the selectedStartups document
       await updateDoc(doc(db, 'selectedStartups', startupId), {
-        founders: editData.founders || [],
+        [field]: value,
         updatedAt: new Date().toISOString()
       });
-
-      setStartupData({ ...startupData, ...editData });
-      setIsEditing(false);
     } catch (error) {
-      console.error('Error updating startup data:', error);
+      console.error('Error updating startup field:', error);
     }
   };
 
-  const handleAddFounder = () => {
+  const handleAddFounder = async () => {
+    if (!auth.currentUser || !startupData) return;
+
     const newFounder: FounderData = {
       id: crypto.randomUUID(),
       name: '',
+      email: '',
+      whatsapp: '',
       linkedin: '',
-      whatsapp: ''
+      cargo: ''
     };
 
-    setEditData(prev => ({
-      ...prev,
-      founders: [...(prev.founders || []), newFounder]
-    }));
+    const updatedFounders = [...startupData.founders, newFounder];
+    const updatedData = { ...startupData, founders: updatedFounders };
+    setStartupData(updatedData);
+
+    try {
+      await updateDoc(doc(db, 'selectedStartups', startupId), {
+        founders: updatedFounders,
+        updatedAt: new Date().toISOString()
+      });
+    } catch (error) {
+      console.error('Error adding founder:', error);
+    }
   };
 
-  const handleUpdateFounder = (founderId: string, field: keyof FounderData, value: string) => {
-    setEditData(prev => ({
-      ...prev,
-      founders: (prev.founders || []).map(founder =>
-        founder.id === founderId ? { ...founder, [field]: value } : founder
-      )
-    }));
+  const handleUpdateFounder = async (founderId: string, field: keyof FounderData, value: string) => {
+    if (!auth.currentUser || !startupData) return;
+
+    const updatedFounders = startupData.founders.map(founder =>
+      founder.id === founderId ? { ...founder, [field]: value } : founder
+    );
+
+    const updatedData = { ...startupData, founders: updatedFounders };
+    setStartupData(updatedData);
+
+    try {
+      await updateDoc(doc(db, 'selectedStartups', startupId), {
+        founders: updatedFounders,
+        updatedAt: new Date().toISOString()
+      });
+    } catch (error) {
+      console.error('Error updating founder:', error);
+    }
   };
 
-  const handleRemoveFounder = (founderId: string) => {
-    setEditData(prev => ({
-      ...prev,
-      founders: (prev.founders || []).filter(founder => founder.id !== founderId)
-    }));
+  const handleRemoveFounder = async (founderId: string) => {
+    if (!auth.currentUser || !startupData) return;
+
+    const updatedFounders = startupData.founders.filter(founder => founder.id !== founderId);
+    const updatedData = { ...startupData, founders: updatedFounders };
+    setStartupData(updatedData);
+
+    try {
+      await updateDoc(doc(db, 'selectedStartups', startupId), {
+        founders: updatedFounders,
+        updatedAt: new Date().toISOString()
+      });
+    } catch (error) {
+      console.error('Error removing founder:', error);
+    }
+  };
+
+  const handleRecipientChange = (value: string) => {
+    setSelectedRecipient(value);
+    if (value === startupData?.startupName) {
+      setSelectedRecipientType('startup');
+    } else {
+      setSelectedRecipientType('founder');
+    }
   };
 
   const handleSendMessage = async () => {
-    if (!auth.currentUser || !startupData || !newMessage.trim()) return;
+    if (!auth.currentUser || !startupData || !newMessage.trim() || !selectedRecipient) return;
 
     setIsSending(true);
 
     try {
-      const messageData: Omit<InteractionMessage, 'id'> = {
+      const messageData: Omit<CRMMessage, 'id'> = {
         startupId,
         userId: auth.currentUser.uid,
         type: messageType,
         content: newMessage.trim(),
         sentAt: new Date().toISOString(),
-        recipientName: selectedRecipient || startupData.startupName
+        recipientName: selectedRecipient,
+        recipientType: selectedRecipientType
       };
 
-      const docRef = await addDoc(collection(db, 'startupInteractions'), messageData);
+      const docRef = await addDoc(collection(db, 'crmMessages'), messageData);
       
-      const newInteraction: InteractionMessage = {
+      const newCrmMessage: CRMMessage = {
         id: docRef.id,
         ...messageData
       };
 
-      setInteractions(prev => [newInteraction, ...prev]);
+      setCrmMessages(prev => [newCrmMessage, ...prev]);
       setNewMessage('');
       setSelectedRecipient('');
     } catch (error) {
@@ -231,19 +275,12 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
             <Building2 size={20} className="text-gray-400" />
             <h2 className="text-lg font-medium">{startupData.startupName}</h2>
           </div>
-          <button
-            onClick={() => setIsEditing(!isEditing)}
-            className="flex items-center gap-2 px-3 py-1 bg-blue-600 hover:bg-blue-700 rounded-lg text-white text-sm transition-colors"
-          >
-            {isEditing ? <X size={16} /> : <Edit3 size={16} />}
-            {isEditing ? 'Cancelar' : 'Editar'}
-          </button>
         </div>
       </div>
 
       <div className="flex h-[calc(100vh-80px)]">
         {/* Left Panel - Startup Data */}
-        <div className="w-1/2 p-6 border-r border-gray-700 overflow-y-auto">
+        <div className="w-1/2 p-6 border-r border-gray-700 overflow-y-auto custom-scrollbar">
           <div className="space-y-6">
             {/* Basic Info */}
             <div className="bg-gray-800 rounded-lg p-4">
@@ -254,10 +291,9 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
                   <label className="block text-sm font-medium text-gray-300 mb-1">Nome da Startup</label>
                   <input
                     type="text"
-                    value={isEditing ? (editData.startupName || '') : startupData.startupName}
-                    onChange={(e) => setEditData(prev => ({ ...prev, startupName: e.target.value }))}
-                    disabled={!isEditing}
-                    className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white disabled:opacity-50"
+                    value={startupData.startupName}
+                    onChange={(e) => handleUpdateStartupField('startupName', e.target.value)}
+                    className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                 </div>
 
@@ -266,10 +302,9 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
                   <div className="flex items-center gap-2">
                     <input
                       type="email"
-                      value={isEditing ? (editData.email || '') : startupData.email}
-                      onChange={(e) => setEditData(prev => ({ ...prev, email: e.target.value }))}
-                      disabled={!isEditing}
-                      className="flex-1 px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white disabled:opacity-50"
+                      value={startupData.email}
+                      onChange={(e) => handleUpdateStartupField('email', e.target.value)}
+                      className="flex-1 px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                     />
                     {startupData.email && (
                       <a
@@ -287,10 +322,9 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
                   <div className="flex items-center gap-2">
                     <input
                       type="url"
-                      value={isEditing ? (editData.website || '') : startupData.website}
-                      onChange={(e) => setEditData(prev => ({ ...prev, website: e.target.value }))}
-                      disabled={!isEditing}
-                      className="flex-1 px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white disabled:opacity-50"
+                      value={startupData.website}
+                      onChange={(e) => handleUpdateStartupField('website', e.target.value)}
+                      className="flex-1 px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                     />
                     {startupData.website && (
                       <a
@@ -310,10 +344,9 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
                   <div className="flex items-center gap-2">
                     <input
                       type="url"
-                      value={isEditing ? (editData.linkedin || '') : startupData.linkedin}
-                      onChange={(e) => setEditData(prev => ({ ...prev, linkedin: e.target.value }))}
-                      disabled={!isEditing}
-                      className="flex-1 px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white disabled:opacity-50"
+                      value={startupData.linkedin}
+                      onChange={(e) => handleUpdateStartupField('linkedin', e.target.value)}
+                      className="flex-1 px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                     />
                     {startupData.linkedin && (
                       <a
@@ -331,11 +364,10 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
                 <div>
                   <label className="block text-sm font-medium text-gray-300 mb-1">Descrição</label>
                   <textarea
-                    value={isEditing ? (editData.description || '') : startupData.description}
-                    onChange={(e) => setEditData(prev => ({ ...prev, description: e.target.value }))}
-                    disabled={!isEditing}
+                    value={startupData.description}
+                    onChange={(e) => handleUpdateStartupField('description', e.target.value)}
                     rows={3}
-                    className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white disabled:opacity-50 resize-none"
+                    className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                 </div>
 
@@ -355,19 +387,17 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
             <div className="bg-gray-800 rounded-lg p-4">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-lg font-bold text-white">Fundadores</h3>
-                {isEditing && (
-                  <button
-                    onClick={handleAddFounder}
-                    className="flex items-center gap-1 px-2 py-1 bg-blue-600 hover:bg-blue-700 rounded text-white text-sm"
-                  >
-                    <Plus size={14} />
-                    Adicionar
-                  </button>
-                )}
+                <button
+                  onClick={handleAddFounder}
+                  className="flex items-center gap-1 px-2 py-1 bg-blue-600 hover:bg-blue-700 rounded text-white text-sm"
+                >
+                  <Plus size={14} />
+                  Adicionar
+                </button>
               </div>
 
               <div className="space-y-4">
-                {(isEditing ? editData.founders : startupData.founders)?.map((founder) => (
+                {startupData.founders?.map((founder) => (
                   <div key={founder.id} className="border border-gray-600 rounded-lg p-3">
                     <div className="space-y-3">
                       <div className="flex items-center justify-between">
@@ -375,14 +405,12 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
                           <User size={16} className="text-gray-400" />
                           <span className="text-white font-medium">Fundador</span>
                         </div>
-                        {isEditing && (
-                          <button
-                            onClick={() => handleRemoveFounder(founder.id)}
-                            className="text-red-400 hover:text-red-300"
-                          >
-                            <X size={16} />
-                          </button>
-                        )}
+                        <button
+                          onClick={() => handleRemoveFounder(founder.id)}
+                          className="text-red-400 hover:text-red-300"
+                        >
+                          <X size={16} />
+                        </button>
                       </div>
 
                       <div>
@@ -391,9 +419,53 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
                           type="text"
                           value={founder.name}
                           onChange={(e) => handleUpdateFounder(founder.id, 'name', e.target.value)}
-                          disabled={!isEditing}
-                          className="w-full px-2 py-1 bg-gray-700 border border-gray-600 rounded text-white text-sm disabled:opacity-50"
+                          className="w-full px-2 py-1 bg-gray-700 border border-gray-600 rounded text-white text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
+                          placeholder="Nome do fundador"
                         />
+                      </div>
+
+                      <div>
+                        <label className="block text-xs text-gray-400 mb-1">E-mail</label>
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="email"
+                            value={founder.email}
+                            onChange={(e) => handleUpdateFounder(founder.id, 'email', e.target.value)}
+                            className="flex-1 px-2 py-1 bg-gray-700 border border-gray-600 rounded text-white text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
+                            placeholder="email@exemplo.com"
+                          />
+                          {founder.email && (
+                            <a
+                              href={`mailto:${founder.email}`}
+                              className="text-blue-400 hover:text-blue-300"
+                            >
+                              <Mail size={14} />
+                            </a>
+                          )}
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="block text-xs text-gray-400 mb-1">WhatsApp</label>
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="tel"
+                            value={founder.whatsapp}
+                            onChange={(e) => handleUpdateFounder(founder.id, 'whatsapp', e.target.value)}
+                            className="flex-1 px-2 py-1 bg-gray-700 border border-gray-600 rounded text-white text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
+                            placeholder="+55 11 99999-9999"
+                          />
+                          {founder.whatsapp && (
+                            <a
+                              href={`https://wa.me/${founder.whatsapp.replace(/\D/g, '')}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-green-400 hover:text-green-300"
+                            >
+                              <Phone size={14} />
+                            </a>
+                          )}
+                        </div>
                       </div>
 
                       <div>
@@ -403,8 +475,8 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
                             type="url"
                             value={founder.linkedin}
                             onChange={(e) => handleUpdateFounder(founder.id, 'linkedin', e.target.value)}
-                            disabled={!isEditing}
-                            className="flex-1 px-2 py-1 bg-gray-700 border border-gray-600 rounded text-white text-sm disabled:opacity-50"
+                            className="flex-1 px-2 py-1 bg-gray-700 border border-gray-600 rounded text-white text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
+                            placeholder="https://linkedin.com/in/..."
                           />
                           {founder.linkedin && (
                             <a
@@ -420,32 +492,23 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
                       </div>
 
                       <div>
-                        <label className="block text-xs text-gray-400 mb-1">WhatsApp/Celular</label>
+                        <label className="block text-xs text-gray-400 mb-1">Cargo</label>
                         <div className="flex items-center gap-2">
+                          <Briefcase size={14} className="text-gray-400" />
                           <input
-                            type="tel"
-                            value={founder.whatsapp}
-                            onChange={(e) => handleUpdateFounder(founder.id, 'whatsapp', e.target.value)}
-                            disabled={!isEditing}
-                            className="flex-1 px-2 py-1 bg-gray-700 border border-gray-600 rounded text-white text-sm disabled:opacity-50"
+                            type="text"
+                            value={founder.cargo}
+                            onChange={(e) => handleUpdateFounder(founder.id, 'cargo', e.target.value)}
+                            className="flex-1 px-2 py-1 bg-gray-700 border border-gray-600 rounded text-white text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
+                            placeholder="CEO, CTO, Fundador..."
                           />
-                          {founder.whatsapp && (
-                            <a
-                              href={`https://wa.me/${founder.whatsapp.replace(/\D/g, '')}`}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="text-green-400 hover:text-green-300"
-                            >
-                              <Phone size={14} />
-                            </a>
-                          )}
                         </div>
                       </div>
                     </div>
                   </div>
                 ))}
 
-                {(!startupData.founders || startupData.founders.length === 0) && !isEditing && (
+                {(!startupData.founders || startupData.founders.length === 0) && (
                   <div className="text-center py-4 text-gray-500">
                     <Users size={24} className="mx-auto mb-2 opacity-50" />
                     <p className="text-sm">Nenhum fundador cadastrado</p>
@@ -453,27 +516,6 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
                 )}
               </div>
             </div>
-
-            {isEditing && (
-              <div className="flex gap-3">
-                <button
-                  onClick={handleSaveEdit}
-                  className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 rounded-lg text-white font-medium"
-                >
-                  <Save size={16} />
-                  Salvar Alterações
-                </button>
-                <button
-                  onClick={() => {
-                    setIsEditing(false);
-                    setEditData(startupData);
-                  }}
-                  className="px-4 py-2 bg-gray-600 hover:bg-gray-700 rounded-lg text-white"
-                >
-                  Cancelar
-                </button>
-              </div>
-            )}
           </div>
         </div>
 
@@ -488,7 +530,7 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
                 <select
                   value={messageType}
                   onChange={(e) => setMessageType(e.target.value as 'email' | 'whatsapp')}
-                  className="px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white"
+                  className="px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                 >
                   <option value="email">Email</option>
                   <option value="whatsapp">WhatsApp</option>
@@ -496,14 +538,14 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
 
                 <select
                   value={selectedRecipient}
-                  onChange={(e) => setSelectedRecipient(e.target.value)}
-                  className="flex-1 px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white"
+                  onChange={(e) => handleRecipientChange(e.target.value)}
+                  className="flex-1 px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                 >
-                  <option value="">Destinatário</option>
+                  <option value="">Selecione o destinatário</option>
                   <option value={startupData.startupName}>{startupData.startupName} (Geral)</option>
                   {startupData.founders?.map((founder) => (
                     <option key={founder.id} value={founder.name}>
-                      {founder.name} (Fundador)
+                      {founder.name} {founder.cargo && `(${founder.cargo})`}
                     </option>
                   ))}
                 </select>
@@ -514,12 +556,12 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
                 onChange={(e) => setNewMessage(e.target.value)}
                 placeholder="Digite sua mensagem..."
                 rows={3}
-                className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white resize-none"
+                className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
 
               <button
                 onClick={handleSendMessage}
-                disabled={!newMessage.trim() || isSending}
+                disabled={!newMessage.trim() || !selectedRecipient || isSending}
                 className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg text-white font-medium"
               >
                 {isSending ? (
@@ -533,40 +575,40 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
           </div>
 
           {/* Timeline */}
-          <div className="flex-1 p-4 overflow-y-auto">
+          <div className="flex-1 p-4 overflow-y-auto custom-scrollbar">
             <h3 className="text-lg font-bold text-white mb-4">Timeline de Interações</h3>
             
             <div className="space-y-4">
-              {interactions.length === 0 ? (
+              {crmMessages.length === 0 ? (
                 <div className="text-center py-8 text-gray-500">
                   <MessageSquare size={32} className="mx-auto mb-2 opacity-50" />
                   <p>Nenhuma interação registrada</p>
                   <p className="text-sm">Envie sua primeira mensagem para começar</p>
                 </div>
               ) : (
-                interactions.map((interaction) => (
-                  <div key={interaction.id} className="bg-gray-800 rounded-lg p-4">
+                crmMessages.map((message) => (
+                  <div key={message.id} className="bg-gray-800 rounded-lg p-4">
                     <div className="flex items-center justify-between mb-2">
                       <div className="flex items-center gap-2">
-                        {interaction.type === 'email' ? (
+                        {message.type === 'email' ? (
                           <Mail size={16} className="text-blue-400" />
                         ) : (
                           <Phone size={16} className="text-green-400" />
                         )}
                         <span className="text-white font-medium">
-                          {interaction.type === 'email' ? 'Email' : 'WhatsApp'}
+                          {message.type === 'email' ? 'Email' : 'WhatsApp'}
                         </span>
-                        {interaction.recipientName && (
+                        {message.recipientName && (
                           <span className="text-gray-400 text-sm">
-                            para {interaction.recipientName}
+                            para {message.recipientName}
                           </span>
                         )}
                       </div>
                       <span className="text-gray-400 text-sm">
-                        {format(new Date(interaction.sentAt), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}
+                        {format(new Date(message.sentAt), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}
                       </span>
                     </div>
-                    <p className="text-gray-300 whitespace-pre-wrap">{interaction.content}</p>
+                    <p className="text-gray-300 whitespace-pre-wrap">{message.content}</p>
                   </div>
                 ))
               )}

@@ -21,21 +21,25 @@
 }
 
 /* Custom scrollbar styles */
-.scrollbar::-webkit-scrollbar {
+.scrollbar::-webkit-scrollbar,
+.custom-scrollbar::-webkit-scrollbar {
   width: 8px;
 }
 
-.scrollbar::-webkit-scrollbar-track {
+.scrollbar::-webkit-scrollbar-track,
+.custom-scrollbar::-webkit-scrollbar-track {
   background: #374151;
   border-radius: 4px;
 }
 
-.scrollbar::-webkit-scrollbar-thumb {
-  background: #111827;
+.scrollbar::-webkit-scrollbar-thumb,
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: #000000;
   border-radius: 4px;
 }
 
-.scrollbar::-webkit-scrollbar-thumb:hover {
+.scrollbar::-webkit-scrollbar-thumb:hover,
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
   background: #1f2937;
 }
 
