@@ -1,15 +1,26 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
-  Star, Calendar, Building2, MapPin, Users, Briefcase, Award, 
-  Target, Rocket, ArrowLeft, Mail, Globe, Box, Linkedin,
-  Facebook, Twitter, Instagram, FolderOpen, Plus, Check
+  Star, Calendar, Building2, MapPin, Users, Briefcase, 
+  ArrowLeft, Mail, Globe, Box, Linkedin, Facebook, 
+  Twitter, Instagram, Trash2, FolderOpen
 } from 'lucide-react';
-import { collection, query, orderBy, limit, getDocs, addDoc, where } from 'firebase/firestore';
+import { collection, query, where, orderBy, getDocs, deleteDoc, doc } from 'firebase/firestore';
 import { db, auth } from '../firebase';
-import { StartupListType, StartupType, SocialLink } from '../types';
+import { StartupType, SocialLink } from '../types';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
+
+interface SavedStartupType {
+  id: string;
+  userId: string;
+  userEmail: string;
+  challengeId: string;
+  challengeTitle: string;
+  startupName: string;
+  startupData: StartupType;
+  selectedAt: string;
+}
 
 const StarRating = ({ rating }: { rating: number }) => {
   return (
@@ -28,54 +39,6 @@ const StarRating = ({ rating }: { rating: number }) => {
             }`}
           />
         ))}
-      </div>
-    </div>
-  );
-};
-
-const ProjectTimeline = ({ planning }: { planning: StartupListType['projectPlanning'] }) => {
-  return (
-    <div className="space-y-8 relative before:absolute before:inset-0 before:ml-5 before:h-full before:w-0.5 before:bg-gradient-to-b before:from-blue-500 before:via-purple-500 before:to-pink-500">
-      {planning.map((phase, index) => (
-        <div key={index} className="relative flex items-start gap-6 group">
-          <div className="flex items-center justify-center w-10 h-10 rounded-full border-2 border-blue-600 bg-gray-900 text-blue-600 font-bold">
-            {index + 1}
-          </div>
-          <div className="flex flex-col items-start">
-            <span className="text-sm text-blue-400">{phase.duration}</span>
-            <h3 className="text-xl font-bold text-white mb-2">{phase.phase}</h3>
-            <p className="text-gray-400">{phase.description}</p>
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-};
-
-const ResultsSection = ({ data }: { data: StartupListType }) => {
-  return (
-    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-      <div className="bg-gradient-to-br from-blue-900/50 to-purple-900/50 p-6 rounded-xl">
-        <h3 className="text-xl font-bold text-white mb-4">Resultados Previstos</h3>
-        <ul className="space-y-4">
-          {data.expectedResults.map((result, index) => (
-            <li key={index} className="flex items-start gap-3">
-              <Target className="text-blue-400 mt-1" size={20} />
-              <span className="text-gray-300">{result}</span>
-            </li>
-          ))}
-        </ul>
-      </div>
-      <div className="bg-gradient-to-br from-purple-900/50 to-pink-900/50 p-6 rounded-xl">
-        <h3 className="text-xl font-bold text-white mb-4">Vantagens Competitivas</h3>
-        <ul className="space-y-4">
-          {data.competitiveAdvantages.map((advantage, index) => (
-            <li key={index} className="flex items-start gap-3">
-              <Award className="text-purple-400 mt-1" size={20} />
-              <span className="text-gray-300">{advantage}</span>
-            </li>
-          ))}
-        </ul>
       </div>
     </div>
   );
@@ -140,68 +103,36 @@ const SocialLinks = ({ startup, className = "" }: { startup: StartupType; classN
   );
 };
 
-const StartupCard = ({ 
-  startup, 
+const SavedStartupCard = ({ 
+  savedStartup, 
   onClick, 
-  challengeTitle, 
-  challengeId,
-  onStartupSaved 
+  onRemove 
 }: { 
-  startup: StartupType; 
+  savedStartup: SavedStartupType; 
   onClick: () => void;
-  challengeTitle: string;
-  challengeId: string;
-  onStartupSaved: () => void;
+  onRemove: (id: string) => void;
 }) => {
-  const [isSaving, setIsSaving] = useState(false);
-  const [isSaved, setIsSaved] = useState(false);
+  const [isRemoving, setIsRemoving] = useState(false);
+  const startup = savedStartup.startupData;
 
-  useEffect(() => {
-    const checkIfSaved = async () => {
-      if (!auth.currentUser) return;
-      
-      try {
-        const q = query(
-          collection(db, 'selectedStartups'),
-          where('userId', '==', auth.currentUser.uid),
-          where('startupName', '==', startup.name)
-        );
-        const querySnapshot = await getDocs(q);
-        setIsSaved(!querySnapshot.empty);
-      } catch (error) {
-        console.error('Error checking if startup is saved:', error);
-      }
-    };
-
-    checkIfSaved();
-  }, [startup.name]);
-
-  const handleSelectStartup = async (e: React.MouseEvent) => {
+  const handleRemove = async (e: React.MouseEvent) => {
     e.stopPropagation();
     
-    if (!auth.currentUser || isSaving || isSaved) return;
+    if (isRemoving) return;
 
-    setIsSaving(true);
+    setIsRemoving(true);
 
     try {
-      await addDoc(collection(db, 'selectedStartups'), {
-        userId: auth.currentUser.uid,
-        userEmail: auth.currentUser.email,
-        challengeId,
-        challengeTitle,
-        startupName: startup.name,
-        startupData: startup,
-        selectedAt: new Date().toISOString()
-      });
-
-      setIsSaved(true);
-      onStartupSaved();
+      await deleteDoc(doc(db, 'selectedStartups', savedStartup.id));
+      onRemove(savedStartup.id);
     } catch (error) {
-      console.error('Error saving startup:', error);
+      console.error('Error removing startup:', error);
     } finally {
-      setIsSaving(false);
+      setIsRemoving(false);
     }
   };
+
+  const formattedDate = format(new Date(savedStartup.selectedAt), "dd/MM/yyyy", { locale: ptBR });
 
   return (
     <div
@@ -210,36 +141,32 @@ const StartupCard = ({
     >
       <div className="flex justify-between items-start mb-4">
         <div className="space-y-3 flex-1">
-          <div className="flex items-center gap-3">
+          <div className="flex items-center justify-between">
             <h2 className="text-xl font-bold text-white">{startup.name}</h2>
             <button
-              onClick={handleSelectStartup}
-              disabled={isSaving || isSaved}
+              onClick={handleRemove}
+              disabled={isRemoving}
               className={`flex items-center gap-2 px-3 py-1 rounded-lg text-sm font-medium transition-all ${
-                isSaved
-                  ? 'bg-green-600 text-white cursor-default'
-                  : isSaving
+                isRemoving
                   ? 'bg-gray-600 text-gray-300 cursor-not-allowed'
-                  : 'bg-blue-600 hover:bg-blue-700 text-white'
+                  : 'bg-red-600 hover:bg-red-700 text-white'
               }`}
             >
-              {isSaved ? (
-                <>
-                  <Check size={16} />
-                  Selecionada
-                </>
-              ) : isSaving ? (
+              {isRemoving ? (
                 <>
                   <div className="w-4 h-4 border-2 border-gray-300 border-t-transparent rounded-full animate-spin" />
-                  Salvando...
+                  Removendo...
                 </>
               ) : (
                 <>
-                  <Plus size={16} />
-                  Selecionar startup
+                  <Trash2 size={16} />
+                  Remover
                 </>
               )}
             </button>
+          </div>
+          <div className="text-sm text-gray-400">
+            <span className="text-blue-400">{savedStartup.challengeTitle}</span> • Salva em {formattedDate}
           </div>
           <SocialLinks startup={startup} />
         </div>
@@ -346,32 +273,41 @@ const StartupDetailCard = ({ startup }: { startup: StartupType }) => {
   );
 };
 
-const StartupList = () => {
+const SavedStartups = () => {
   const navigate = useNavigate();
-  const [startupData, setStartupData] = useState<StartupListType | null>(null);
+  const [savedStartups, setSavedStartups] = useState<SavedStartupType[]>([]);
   const [selectedStartup, setSelectedStartup] = useState<StartupType | null>(null);
-  const [refreshKey, setRefreshKey] = useState(0);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const fetchStartupData = async () => {
+    const fetchSavedStartups = async () => {
+      if (!auth.currentUser) {
+        navigate('/login');
+        return;
+      }
+
       try {
         const q = query(
-          collection(db, 'startupLists'),
-          orderBy('createdAt', 'desc'),
-          limit(1)
+          collection(db, 'selectedStartups'),
+          where('userId', '==', auth.currentUser.uid),
+          orderBy('selectedAt', 'desc')
         );
         const querySnapshot = await getDocs(q);
-        if (!querySnapshot.empty) {
-          const doc = querySnapshot.docs[0];
-          setStartupData({ id: doc.id, ...doc.data() } as StartupListType);
-        }
+        const startups = querySnapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        })) as SavedStartupType[];
+        
+        setSavedStartups(startups);
       } catch (error) {
-        console.error('Error fetching startup data:', error);
+        console.error('Error fetching saved startups:', error);
+      } finally {
+        setLoading(false);
       }
     };
 
-    fetchStartupData();
-  }, []);
+    fetchSavedStartups();
+  }, [navigate]);
 
   const handleStartupClick = (startup: StartupType) => {
     setSelectedStartup(startup);
@@ -385,21 +321,17 @@ const StartupList = () => {
     }
   };
 
-  const handleStartupSaved = () => {
-    setRefreshKey(prev => prev + 1);
+  const handleRemoveStartup = (removedId: string) => {
+    setSavedStartups(prev => prev.filter(startup => startup.id !== removedId));
   };
 
-  if (!startupData) {
+  if (loading) {
     return (
       <div className="min-h-screen bg-black flex items-center justify-center">
-        <div className="text-white">Carregando...</div>
+        <div className="text-white">Carregando startups salvas...</div>
       </div>
     );
   }
-
-  const formattedDate = startupData.createdAt 
-    ? format(new Date(startupData.createdAt), "dd/MM/yyyy", { locale: ptBR })
-    : '';
 
   if (selectedStartup) {
     return (
@@ -410,7 +342,7 @@ const StartupList = () => {
             className="flex items-center text-gray-400 hover:text-white mb-8"
           >
             <ArrowLeft size={20} className="mr-2" />
-            Voltar para lista
+            Voltar para startups salvas
           </button>
 
           <StartupDetailCard startup={selectedStartup} />
@@ -431,41 +363,44 @@ const StartupList = () => {
           </button>
           <div className="flex items-center gap-2 flex-1 ml-4">
             <FolderOpen size={20} className="text-gray-400" />
-            <h2 className="text-lg font-medium">{startupData.challengeTitle}</h2>
+            <h2 className="text-lg font-medium">Startups Salvas</h2>
           </div>
-          <span className="text-sm text-gray-400">{formattedDate}</span>
+          <span className="text-sm text-gray-400">{savedStartups.length} startup{savedStartups.length !== 1 ? 's' : ''}</span>
         </div>
       </div>
 
       <div className="p-8">
         <div className="max-w-7xl mx-auto">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mb-16" key={refreshKey}>
-            {startupData.startups.map((startup, index) => (
-              <StartupCard
-                key={index}
-                startup={startup}
-                onClick={() => handleStartupClick(startup)}
-                challengeTitle={startupData.challengeTitle}
-                challengeId={startupData.id}
-                onStartupSaved={handleStartupSaved}
-              />
-            ))}
-          </div>
-
-          <div className="space-y-16">
-            <section>
-              <h2 className="text-2xl font-bold text-white mb-8">Provas de conceito</h2>
-              <ProjectTimeline planning={startupData.projectPlanning} />
-            </section>
-
-            <section>
-              <ResultsSection data={startupData} />
-            </section>
-          </div>
+          {savedStartups.length === 0 ? (
+            <div className="text-center py-16">
+              <FolderOpen size={64} className="text-gray-600 mx-auto mb-4" />
+              <h3 className="text-xl font-bold text-white mb-2">Nenhuma startup salva</h3>
+              <p className="text-gray-400 mb-6">
+                Você ainda não salvou nenhuma startup. Explore as listas de startups e salve suas favoritas.
+              </p>
+              <button
+                onClick={() => navigate('/startups')}
+                className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-lg font-medium transition-colors"
+              >
+                Explorar Startups
+              </button>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+              {savedStartups.map((savedStartup) => (
+                <SavedStartupCard
+                  key={savedStartup.id}
+                  savedStartup={savedStartup}
+                  onClick={() => handleStartupClick(savedStartup.startupData)}
+                  onRemove={handleRemoveStartup}
+                />
+              ))}
+            </div>
+          )}
         </div>
       </div>
     </div>
   );
 };
 
-export default StartupList;
+export default SavedStartups;

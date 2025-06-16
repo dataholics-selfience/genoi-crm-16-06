@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Plus, X, FolderClosed, FolderOpen, Rocket } from 'lucide-react';
+import { Plus, X, FolderClosed, FolderOpen, Rocket, Bookmark } from 'lucide-react';
 import { signOut } from 'firebase/auth';
 import { Link, useNavigate } from 'react-router-dom';
 import { auth, db } from '../firebase';
@@ -20,6 +20,7 @@ interface SidebarProps {
 const Sidebar = ({ isOpen, toggleSidebar, challenges, currentChallengeId, onSelectChallenge }: SidebarProps) => {
   const navigate = useNavigate();
   const [challengeStartups, setChallengeStartups] = useState<Record<string, StartupListType[]>>({});
+  const [savedStartupsCount, setSavedStartupsCount] = useState(0);
 
   useEffect(() => {
     const fetchStartupLists = async () => {
@@ -39,6 +40,25 @@ const Sidebar = ({ isOpen, toggleSidebar, challenges, currentChallengeId, onSele
 
     fetchStartupLists();
   }, [challenges]);
+
+  useEffect(() => {
+    const fetchSavedStartupsCount = async () => {
+      if (!auth.currentUser) return;
+
+      try {
+        const q = query(
+          collection(db, 'selectedStartups'),
+          where('userId', '==', auth.currentUser.uid)
+        );
+        const querySnapshot = await getDocs(q);
+        setSavedStartupsCount(querySnapshot.size);
+      } catch (error) {
+        console.error('Error fetching saved startups count:', error);
+      }
+    };
+
+    fetchSavedStartupsCount();
+  }, []);
 
   const handleLogout = async () => {
     try {
@@ -80,13 +100,26 @@ const Sidebar = ({ isOpen, toggleSidebar, challenges, currentChallengeId, onSele
         </div>
 
         <div className="flex-1 overflow-y-auto scrollbar">
-          <div className="p-3">
+          <div className="p-3 space-y-2">
             <Link 
               to="/new-challenge"
               className="w-full flex items-center gap-2 text-base font-bold bg-gradient-to-r from-blue-600 to-blue-800 hover:from-blue-700 hover:to-blue-900 text-white p-3 rounded-lg transition-all shadow-lg hover:shadow-xl"
             >
               <Plus size={18} />
               <span>Novo desafio</span>
+            </Link>
+
+            <Link 
+              to="/saved-startups"
+              className="w-full flex items-center gap-2 text-base font-medium bg-gradient-to-r from-purple-600 to-purple-800 hover:from-purple-700 hover:to-purple-900 text-white p-3 rounded-lg transition-all shadow-lg hover:shadow-xl"
+            >
+              <Bookmark size={18} />
+              <span>Startups salvas</span>
+              {savedStartupsCount > 0 && (
+                <span className="ml-auto bg-purple-500 text-white text-xs px-2 py-1 rounded-full">
+                  {savedStartupsCount}
+                </span>
+              )}
             </Link>
           </div>
 

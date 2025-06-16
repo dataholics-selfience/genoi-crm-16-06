@@ -13,6 +13,7 @@ import Plans from './components/Plans';
 import EmailVerification from './components/auth/EmailVerification';
 import AccountDeleted from './components/AccountDeleted';
 import StartupList from './components/StartupList';
+import SavedStartups from './components/SavedStartups';
 import JediSuccess from './pages/plans/success/jedi';
 import MestreJediSuccess from './pages/plans/success/mestrejedi';
 import MestreYodaSuccess from './pages/plans/success/mestreyoda';
@@ -64,6 +65,7 @@ function App() {
         <Route path="/new-challenge" element={user?.emailVerified ? <NewChallenge /> : <Navigate to="/verify-email" replace />} />
         <Route path="/plans" element={<Plans />} />
         <Route path="/startups" element={user?.emailVerified ? <StartupList /> : <Navigate to="/verify-email" replace />} />
+        <Route path="/saved-startups" element={user?.emailVerified ? <SavedStartups /> : <Navigate to="/verify-email" replace />} />
         <Route path="/account-deleted" element={<AccountDeleted />} />
         <Route path="/plans/success/jedi" element={<JediSuccess />} />
         <Route path="/plans/success/mestrejedi" element={<MestreJediSuccess />} />
