@@ -146,21 +146,27 @@ const NewMessageModal = ({
         };
       }
 
-      // Check daily limit for user
+      // Check daily limit for user - Use simpler query without composite index
       const today = new Date();
       today.setHours(0, 0, 0, 0);
       const tomorrow = new Date(today);
       tomorrow.setDate(tomorrow.getDate() + 1);
 
+      // Query only by userId first, then filter by date in memory to avoid composite index
       const dailyQuery = query(
         collection(db, 'emailLogs'),
-        where('userId', '==', auth.currentUser.uid),
-        where('sentAt', '>=', today.toISOString()),
-        where('sentAt', '<', tomorrow.toISOString())
+        where('userId', '==', auth.currentUser.uid)
       );
 
       const dailySnapshot = await getDocs(dailyQuery);
-      const dailyCount = dailySnapshot.size;
+      const todayISOString = today.toISOString();
+      const tomorrowISOString = tomorrow.toISOString();
+      
+      // Filter by date in memory
+      const dailyCount = dailySnapshot.docs.filter(doc => {
+        const sentAt = doc.data().sentAt;
+        return sentAt >= todayISOString && sentAt < tomorrowISOString;
+      }).length;
 
       if (dailyCount >= DAILY_EMAIL_LIMIT) {
         return { 
@@ -169,18 +175,22 @@ const NewMessageModal = ({
         };
       }
 
-      // Check monthly platform limit
+      // Check monthly platform limit - Use simpler approach
       const firstDayOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
       const firstDayOfNextMonth = new Date(today.getFullYear(), today.getMonth() + 1, 1);
 
-      const monthlyQuery = query(
-        collection(db, 'emailLogs'),
-        where('sentAt', '>=', firstDayOfMonth.toISOString()),
-        where('sentAt', '<', firstDayOfNextMonth.toISOString())
-      );
-
-      const monthlySnapshot = await getDocs(monthlyQuery);
-      const monthlyCount = monthlySnapshot.size;
+      // Get all email logs and filter by month in memory to avoid composite index issues
+      const allEmailsQuery = query(collection(db, 'emailLogs'));
+      const allEmailsSnapshot = await getDocs(allEmailsQuery);
+      
+      const firstDayOfMonthISOString = firstDayOfMonth.toISOString();
+      const firstDayOfNextMonthISOString = firstDayOfNextMonth.toISOString();
+      
+      // Filter by month in memory
+      const monthlyCount = allEmailsSnapshot.docs.filter(doc => {
+        const sentAt = doc.data().sentAt;
+        return sentAt >= firstDayOfMonthISOString && sentAt < firstDayOfNextMonthISOString;
+      }).length;
 
       if (monthlyCount >= MONTHLY_EMAIL_LIMIT) {
         return { 
