@@ -171,49 +171,6 @@ const NewMessageModal = ({
     }
   };
 
-  const checkEmailLimits = async (): Promise<boolean> => {
-    if (!auth.currentUser) return false;
-
-    try {
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      const todayISO = today.toISOString();
-
-      const thisMonth = new Date();
-      thisMonth.setDate(1);
-      thisMonth.setHours(0, 0, 0, 0);
-      const thisMonthISO = thisMonth.toISOString();
-
-      // Check daily limit (100 emails per day per user)
-      const dailyQuery = query(
-        collection(db, 'emailLogs'),
-        where('userId', '==', auth.currentUser.uid),
-        where('sentAt', '>=', todayISO)
-      );
-      const dailySnapshot = await getDocs(dailyQuery);
-      
-      if (dailySnapshot.size >= 100) {
-        throw new Error('Limite diário de 100 emails atingido. Tente novamente amanhã.');
-      }
-
-      // Check monthly platform limit (3000 emails per month total)
-      const monthlyQuery = query(
-        collection(db, 'emailLogs'),
-        where('sentAt', '>=', thisMonthISO)
-      );
-      const monthlySnapshot = await getDocs(monthlyQuery);
-      
-      if (monthlySnapshot.size >= 3000) {
-        throw new Error('Limite mensal da plataforma de 3.000 emails atingido. Tente novamente no próximo mês.');
-      }
-
-      return true;
-    } catch (error) {
-      console.error('Error checking email limits:', error);
-      throw error;
-    }
-  };
-
   const checkAndUpdateTokens = async (cost: number): Promise<boolean> => {
     if (!auth.currentUser || !tokenUsage) return false;
 
@@ -286,18 +243,13 @@ const NewMessageModal = ({
       // Validações específicas para email
       if (messageType === 'email') {
         if (!emailSubject.trim()) {
-          alert('Por favor, preencha o assunto do email.');
           setIsSending(false);
           return;
         }
         if (!selectedRecipientEmail) {
-          alert('Email do destinatário não encontrado.');
           setIsSending(false);
           return;
         }
-
-        // Check email limits
-        await checkEmailLimits();
 
         // Check and update tokens
         const hasTokens = await checkAndUpdateTokens(EMAIL_TOKEN_COST);
@@ -384,15 +336,6 @@ const NewMessageModal = ({
           }
         });
 
-        // Log the email for tracking limits
-        await addDoc(collection(db, 'emailLogs'), {
-          userId: auth.currentUser.uid,
-          recipientEmail: selectedRecipientEmail,
-          sentAt: new Date().toISOString(),
-          emailDocId: emailDoc.id,
-          subject: finalSubject
-        });
-
         console.log('Email document created with ID:', emailDoc.id);
       }
 
@@ -428,22 +371,6 @@ const NewMessageModal = ({
 
     } catch (error: any) {
       console.error('Error sending message:', error);
-      
-      let errorMessage = 'Erro ao enviar mensagem. Tente novamente.';
-      
-      if (error.message.includes('Limite diário')) {
-        errorMessage = error.message;
-      } else if (error.message.includes('Limite mensal')) {
-        errorMessage = error.message;
-      } else if (error.code === 'permission-denied') {
-        errorMessage = 'Permissão negada. Verifique se a extensão MailerSend está instalada e configurada corretamente.';
-      } else if (error.code === 'not-found') {
-        errorMessage = 'Coleção "emails" não encontrada. Verifique se a extensão MailerSend está instalada.';
-      } else if (error.message) {
-        errorMessage = `Erro: ${error.message}`;
-      }
-      
-      alert(errorMessage);
     } finally {
       setIsSending(false);
     }
