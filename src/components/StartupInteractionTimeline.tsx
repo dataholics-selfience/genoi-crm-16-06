@@ -195,7 +195,7 @@ const NewMessageModal = ({
         `;
 
         // Enviar email usando a extensão oficial do MailerSend
-        const emailDoc = await addDoc(collection(db, 'emails'), {
+        await addDoc(collection(db, 'emails'), {
           to: [
             {
               email: selectedRecipientEmail,
@@ -223,8 +223,6 @@ const NewMessageModal = ({
             timestamp: new Date().toISOString()
           }
         });
-
-        console.log('Email document created with ID:', emailDoc.id);
       }
 
       // Registrar a mensagem no CRM
@@ -250,19 +248,12 @@ const NewMessageModal = ({
 
       onMessageSent(newCrmMessage);
       
-      // Reset form
+      // Reset form and close modal
       setNewMessage('');
       setEmailSubject('');
       setSelectedRecipient('');
       setSelectedRecipientEmail('');
       onClose();
-
-      // Show success message
-      if (messageType === 'email') {
-        alert(`Email enviado com sucesso!\n\nDe: contact@genoi.net\nPara: ${selectedRecipientEmail}\nAssunto: ${emailSubject}\n\nO email será processado pela extensão MailerSend.`);
-      } else {
-        alert('Mensagem WhatsApp registrada. Envie manualmente através do WhatsApp.');
-      }
 
     } catch (error: any) {
       console.error('Error sending message:', error);
@@ -340,12 +331,6 @@ const NewMessageModal = ({
             </div>
           )}
 
-          {selectedRecipientEmail && messageType === 'email' && (
-            <div className="text-sm text-gray-400 bg-gray-700 p-2 rounded">
-              📧 Será enviado para: <strong>{selectedRecipientEmail}</strong>
-            </div>
-          )}
-
           <div>
             <label className="block text-sm text-gray-300 mb-1">
               {messageType === 'email' ? 'Conteúdo do Email' : 'Mensagem WhatsApp'}
@@ -358,18 +343,6 @@ const NewMessageModal = ({
               className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
           </div>
-
-          {messageType === 'email' && (
-            <div className="text-xs text-gray-400 bg-gray-700 p-3 rounded">
-              <strong>ℹ️ Configuração do Email:</strong>
-              <ul className="mt-1 space-y-1">
-                <li>• <strong>Remetente:</strong> contact@genoi.net ({senderName})</li>
-                <li>• <strong>Responder para:</strong> contact@genoi.net</li>
-                <li>• <strong>Processamento:</strong> Extensão oficial MailerSend</li>
-                <li>• O email será formatado automaticamente com a identidade visual da Gen.OI</li>
-              </ul>
-            </div>
-          )}
 
           <div className="flex gap-2">
             <button
