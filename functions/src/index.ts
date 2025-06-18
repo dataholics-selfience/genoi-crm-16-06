@@ -123,10 +123,10 @@ export const sendEmail = functions.https.onCall(async (data: EmailRequest, conte
     
     // Provide more specific error information instead of generic message
     const errorMessage = error.message || 'Erro interno do servidor';
-    const errorCode = error.code || 'internal';
+    const errorCode = error.code || 'unknown';
     
     throw new functions.https.HttpsError(
-      errorCode === 'internal' ? 'internal' : 'unknown',
+      errorCode === 'unknown' ? 'unknown' : 'internal',
       `Erro ao processar mensagem: ${errorMessage}`,
       { originalError: error.toString() }
     );
