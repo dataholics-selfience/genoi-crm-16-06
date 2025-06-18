@@ -52,6 +52,10 @@ interface CRMMessage {
   sentAt: string;
   recipientName?: string;
   recipientType: 'startup' | 'founder';
+  recipientEmail?: string;
+  subject?: string;
+  status?: 'sent' | 'failed';
+  mailersendId?: string;
 }
 
 interface StartupInteractionTimelineProps {
@@ -66,6 +70,107 @@ const PIPELINE_STAGES = [
   { id: 'entrevistada', name: 'Entrevistada', color: 'bg-green-200 text-green-800 border-green-300' },
   { id: 'poc', name: 'POC', color: 'bg-orange-200 text-orange-800 border-orange-300' }
 ];
+
+const sendEmailViaMailerSend = async (
+  recipientEmail: string,
+  recipientName: string,
+  subject: string,
+  textContent: string,
+  htmlContent: string
+) => {
+  try {
+    const response = await fetch("https://api.mailersend.com/v1/email", {
+      method: "POST",
+      headers: {
+        Authorization: "Bearer mlsn.64216f7d25a14bd7a5a5ef79c45a74e59e8fec49d0de561db2b213b8c3fd900a",
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        from: {
+          email: "contact@genoi.com.br",
+          name: "Agente de inovação aberta - Genie"
+        },
+        to: [
+          {
+            email: recipientEmail,
+            name: recipientName
+          }
+        ],
+        reply_to: {
+          email: "contact@genoi.net",
+          name: "Contato - Gen.OI"
+        },
+        subject: subject,
+        text: textContent,
+        html: htmlContent
+      })
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(`MailerSend API error: ${errorData.message || response.statusText}`);
+    }
+
+    const result = await response.json();
+    return {
+      success: true,
+      mailersendId: result.id || result.message_id,
+      data: result
+    };
+  } catch (error) {
+    console.error('Error sending email via MailerSend:', error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error'
+    };
+  }
+};
+
+const generateEmailHTML = (content: string, senderName: string) => {
+  return `
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Mensagem da Gen.OI</title>
+    </head>
+    <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+        <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 30px; text-align: center; border-radius: 10px 10px 0 0;">
+            <img src="https://genoi.net/wp-content/uploads/2024/12/Logo-gen.OI-Novo-1-2048x1035.png" alt="Gen.OI" style="height: 60px; margin-bottom: 20px;">
+            <h1 style="color: white; margin: 0; font-size: 24px;">Gen.OI - Inovação Aberta</h1>
+        </div>
+        
+        <div style="background: #f8f9fa; padding: 30px; border-radius: 0 0 10px 10px;">
+            <div style="background: white; padding: 25px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
+                <div style="white-space: pre-wrap; margin-bottom: 25px; font-size: 16px;">
+                    ${content.replace(/\n/g, '<br>')}
+                </div>
+                
+                <hr style="border: none; border-top: 1px solid #eee; margin: 25px 0;">
+                
+                <div style="font-size: 14px; color: #666;">
+                    <p><strong>Atenciosamente,</strong><br>
+                    ${senderName}<br>
+                    <em>Agente de Inovação Aberta - Gen.OI</em></p>
+                    
+                    <p style="margin-top: 20px;">
+                        <strong>Gen.OI</strong><br>
+                        Conectando empresas às melhores startups do mundo<br>
+                        🌐 <a href="https://genoi.net" style="color: #667eea;">genoi.net</a><br>
+                        📧 <a href="mailto:contact@genoi.net" style="color: #667eea;">contact@genoi.net</a>
+                    </p>
+                </div>
+            </div>
+        </div>
+        
+        <div style="text-align: center; margin-top: 20px; font-size: 12px; color: #999;">
+            <p>Esta mensagem foi enviada através da plataforma Gen.OI de inovação aberta.</p>
+        </div>
+    </body>
+    </html>
+  `;
+};
 
 const NewMessageModal = ({ 
   isOpen, 
@@ -82,14 +187,41 @@ const NewMessageModal = ({
   const [messageType, setMessageType] = useState<'email' | 'whatsapp'>('email');
   const [selectedRecipient, setSelectedRecipient] = useState('');
   const [selectedRecipientType, setSelectedRecipientType] = useState<'startup' | 'founder'>('startup');
+  const [selectedRecipientEmail, setSelectedRecipientEmail] = useState('');
+  const [emailSubject, setEmailSubject] = useState('');
   const [isSending, setIsSending] = useState(false);
+  const [senderName, setSenderName] = useState('');
+
+  useEffect(() => {
+    const fetchSenderName = async () => {
+      if (!auth.currentUser) return;
+      
+      try {
+        const userDoc = await getDoc(doc(db, 'users', auth.currentUser.uid));
+        if (userDoc.exists()) {
+          setSenderName(userDoc.data().name || 'Equipe Gen.OI');
+        }
+      } catch (error) {
+        console.error('Error fetching sender name:', error);
+        setSenderName('Equipe Gen.OI');
+      }
+    };
+
+    if (isOpen) {
+      fetchSenderName();
+    }
+  }, [isOpen]);
 
   const handleRecipientChange = (value: string) => {
     setSelectedRecipient(value);
+    
     if (value === startupData?.startupName) {
       setSelectedRecipientType('startup');
+      setSelectedRecipientEmail(startupData.email);
     } else {
       setSelectedRecipientType('founder');
+      const founder = startupData.founders?.find(f => f.name === value);
+      setSelectedRecipientEmail(founder?.email || '');
     }
   };
 
@@ -99,6 +231,40 @@ const NewMessageModal = ({
     setIsSending(true);
 
     try {
+      let messageStatus: 'sent' | 'failed' = 'sent';
+      let mailersendId: string | undefined;
+
+      // Send email via MailerSend if it's an email message
+      if (messageType === 'email' && selectedRecipientEmail) {
+        if (!emailSubject.trim()) {
+          alert('Por favor, preencha o assunto do email.');
+          setIsSending(false);
+          return;
+        }
+
+        const htmlContent = generateEmailHTML(newMessage, senderName);
+        const textContent = newMessage; // Plain text fallback
+
+        const emailResult = await sendEmailViaMailerSend(
+          selectedRecipientEmail,
+          selectedRecipient,
+          emailSubject,
+          textContent,
+          htmlContent
+        );
+
+        if (!emailResult.success) {
+          alert(`Erro ao enviar email: ${emailResult.error}`);
+          messageStatus = 'failed';
+        } else {
+          mailersendId = emailResult.mailersendId;
+          alert('Email enviado com sucesso!');
+        }
+      } else if (messageType === 'whatsapp') {
+        // For WhatsApp, we just record the message (no actual sending implemented)
+        alert('Mensagem WhatsApp registrada. Envie manualmente através do WhatsApp.');
+      }
+
       const messageData: Omit<CRMMessage, 'id'> = {
         startupId: startupData.id,
         userId: auth.currentUser.uid,
@@ -106,7 +272,11 @@ const NewMessageModal = ({
         content: newMessage.trim(),
         sentAt: new Date().toISOString(),
         recipientName: selectedRecipient,
-        recipientType: selectedRecipientType
+        recipientType: selectedRecipientType,
+        recipientEmail: selectedRecipientEmail || undefined,
+        subject: messageType === 'email' ? emailSubject : undefined,
+        status: messageStatus,
+        mailersendId: mailersendId || undefined
       };
 
       const docRef = await addDoc(collection(db, 'crmMessages'), messageData);
@@ -118,7 +288,9 @@ const NewMessageModal = ({
 
       onMessageSent(newCrmMessage);
       setNewMessage('');
+      setEmailSubject('');
       setSelectedRecipient('');
+      setSelectedRecipientEmail('');
       onClose();
     } catch (error) {
       console.error('Error sending message:', error);
@@ -132,7 +304,7 @@ const NewMessageModal = ({
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-gray-800 rounded-lg p-6 w-full max-w-md mx-4">
+      <div className="bg-gray-800 rounded-lg p-6 w-full max-w-2xl mx-4 max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-lg font-bold text-white">Nova Mensagem</h3>
           <button
@@ -160,7 +332,9 @@ const NewMessageModal = ({
               className="flex-1 px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
               <option value="">Selecione o destinatário</option>
-              <option value={startupData.startupName}>{startupData.startupName} (Geral)</option>
+              {startupData.email && (
+                <option value={startupData.startupName}>{startupData.startupName} (Geral)</option>
+              )}
               {startupData.founders?.filter(founder => founder.name.trim()).map((founder) => (
                 <option key={founder.id} value={founder.name}>
                   {founder.name} {founder.cargo && `(${founder.cargo})`}
@@ -169,18 +343,55 @@ const NewMessageModal = ({
             </select>
           </div>
 
-          <textarea
-            value={newMessage}
-            onChange={(e) => setNewMessage(e.target.value)}
-            placeholder="Digite sua mensagem..."
-            rows={4}
-            className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
-          />
+          {messageType === 'email' && (
+            <div>
+              <label className="block text-sm text-gray-300 mb-1">Assunto do Email *</label>
+              <input
+                type="text"
+                value={emailSubject}
+                onChange={(e) => setEmailSubject(e.target.value)}
+                placeholder="Digite o assunto do email..."
+                className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                required
+              />
+            </div>
+          )}
+
+          {selectedRecipientEmail && messageType === 'email' && (
+            <div className="text-sm text-gray-400">
+              📧 Será enviado para: {selectedRecipientEmail}
+            </div>
+          )}
+
+          <div>
+            <label className="block text-sm text-gray-300 mb-1">
+              {messageType === 'email' ? 'Conteúdo do Email' : 'Mensagem WhatsApp'}
+            </label>
+            <textarea
+              value={newMessage}
+              onChange={(e) => setNewMessage(e.target.value)}
+              placeholder={messageType === 'email' ? 'Digite o conteúdo do email...' : 'Digite sua mensagem...'}
+              rows={6}
+              className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+
+          {messageType === 'email' && (
+            <div className="text-xs text-gray-400 bg-gray-700 p-3 rounded">
+              <strong>ℹ️ Informações do Email:</strong>
+              <ul className="mt-1 space-y-1">
+                <li>• Remetente: Agente de inovação aberta - Genie (contact@genoi.com.br)</li>
+                <li>• Responder para: contact@genoi.net</li>
+                <li>• O email será formatado automaticamente com a identidade visual da Gen.OI</li>
+                <li>• Respostas serão recebidas em contact@genoi.net</li>
+              </ul>
+            </div>
+          )}
 
           <div className="flex gap-2">
             <button
               onClick={handleSendMessage}
-              disabled={!newMessage.trim() || !selectedRecipient || isSending}
+              disabled={!newMessage.trim() || !selectedRecipient || isSending || (messageType === 'email' && !emailSubject.trim())}
               className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg text-white font-medium"
             >
               {isSending ? (
@@ -188,7 +399,7 @@ const NewMessageModal = ({
               ) : (
                 <Send size={16} />
               )}
-              {isSending ? 'Enviando...' : 'Enviar Mensagem'}
+              {isSending ? 'Enviando...' : messageType === 'email' ? 'Enviar Email' : 'Registrar WhatsApp'}
             </button>
             <button
               onClick={onClose}
@@ -860,12 +1071,37 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
                             para {message.recipientName}
                           </span>
                         )}
+                        {message.status === 'failed' && (
+                          <span className="text-red-400 text-xs bg-red-900/20 px-2 py-1 rounded">
+                            Falha no envio
+                          </span>
+                        )}
+                        {message.status === 'sent' && message.type === 'email' && (
+                          <span className="text-green-400 text-xs bg-green-900/20 px-2 py-1 rounded">
+                            Enviado
+                          </span>
+                        )}
                       </div>
                       <span className="text-gray-400 text-sm">
                         {format(new Date(message.sentAt), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}
                       </span>
                     </div>
+                    {message.subject && (
+                      <div className="text-blue-300 font-medium mb-2">
+                        Assunto: {message.subject}
+                      </div>
+                    )}
+                    {message.recipientEmail && (
+                      <div className="text-gray-400 text-sm mb-2">
+                        📧 {message.recipientEmail}
+                      </div>
+                    )}
                     <p className="text-gray-300 whitespace-pre-wrap">{message.content}</p>
+                    {message.mailersendId && (
+                      <div className="text-xs text-gray-500 mt-2">
+                        ID: {message.mailersendId}
+                      </div>
+                    )}
                   </div>
                 ))
               )}
