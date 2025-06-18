@@ -143,12 +143,10 @@ const NewMessageModal = ({
       // Validações específicas para email
       if (messageType === 'email') {
         if (!emailSubject.trim()) {
-          alert('Por favor, preencha o assunto do email.');
           setIsSending(false);
           return;
         }
         if (!selectedRecipientEmail) {
-          alert('Email do destinatário não encontrado.');
           setIsSending(false);
           return;
         }
@@ -195,7 +193,7 @@ const NewMessageModal = ({
               </div>
               
               <div style="text-align: center; margin-top: 20px; font-size: 12px; color: #999;">
-                  <p>Esta mensagem foi enviada através da plataforma Gen.OI de inovação aberta.</p>
+                  <p>Enviado via Genoi.net</p>
               </div>
           </body>
           </html>
@@ -210,7 +208,7 @@ const NewMessageModal = ({
             }
           ],
           from: {
-            email: 'contact@genoi.net',
+            email: 'contact@genoi.com.br',
             name: 'Gen.OI - Inovação Aberta'
           },
           subject: dynamicSubject,
@@ -1025,7 +1023,7 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
                         )}
                         {message.status === 'sent' && message.type === 'email' && (
                           <span className="text-green-400 text-xs bg-green-900/20 px-2 py-1 rounded">
-                            Enviado via MailerSend
+                            Enviado via Genoi.net
                           </span>
                         )}
                         {message.status === 'delivered' && (
