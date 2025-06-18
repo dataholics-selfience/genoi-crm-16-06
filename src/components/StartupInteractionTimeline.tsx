@@ -63,12 +63,6 @@ interface StartupInteractionTimelineProps {
   onBack: () => void;
 }
 
-interface TokenUsage {
-  totalTokens: number;
-  usedTokens: number;
-  plan: string;
-}
-
 const PIPELINE_STAGES = [
   { id: 'mapeada', name: 'Mapeada', color: 'bg-yellow-200 text-yellow-800 border-yellow-300' },
   { id: 'selecionada', name: 'Selecionada', color: 'bg-blue-200 text-blue-800 border-blue-300' },
@@ -76,62 +70,6 @@ const PIPELINE_STAGES = [
   { id: 'entrevistada', name: 'Entrevistada', color: 'bg-green-200 text-green-800 border-green-300' },
   { id: 'poc', name: 'POC', color: 'bg-orange-200 text-orange-800 border-orange-300' }
 ];
-
-const InsufficientTokensModal = ({ 
-  isOpen, 
-  onClose, 
-  requiredTokens,
-  currentTokens 
-}: {
-  isOpen: boolean;
-  onClose: () => void;
-  requiredTokens: number;
-  currentTokens: number;
-}) => {
-  if (!isOpen) return null;
-
-  return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-gray-800 rounded-lg p-6 w-full max-w-md mx-4">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-bold text-white">Tokens Insuficientes</h3>
-          <button
-            onClick={onClose}
-            className="text-gray-400 hover:text-white"
-          >
-            <X size={20} />
-          </button>
-        </div>
-        
-        <div className="space-y-4">
-          <div className="bg-red-900/20 border border-red-700 rounded-lg p-4">
-            <p className="text-red-200 mb-2">
-              Você precisa de <strong>{requiredTokens} tokens</strong> para enviar este email.
-            </p>
-            <p className="text-red-300 text-sm">
-              Saldo atual: <strong>{currentTokens} tokens</strong>
-            </p>
-          </div>
-
-          <div className="flex gap-2">
-            <button
-              onClick={() => window.location.href = '/plans'}
-              className="flex-1 px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg text-white font-medium"
-            >
-              Atualizar Plano
-            </button>
-            <button
-              onClick={onClose}
-              className="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-white font-medium"
-            >
-              Fechar
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-};
 
 const NewMessageModal = ({ 
   isOpen, 
@@ -152,109 +90,15 @@ const NewMessageModal = ({
   const [emailSubject, setEmailSubject] = useState('');
   const [isSending, setIsSending] = useState(false);
   const [senderName, setSenderName] = useState('');
-  const [companyName, setCompanyName] = useState('');
-  const [tokenUsage, setTokenUsage] = useState<TokenUsage | null>(null);
-  const [showInsufficientTokens, setShowInsufficientTokens] = useState(false);
-
-  const EMAIL_TOKEN_COST = 10;
-
-  const fetchTokenBalance = async () => {
-    if (!auth.currentUser) return;
-    
-    try {
-      const tokenDoc = await getDoc(doc(db, 'tokenUsage', auth.currentUser.uid));
-      if (tokenDoc.exists()) {
-        setTokenUsage(tokenDoc.data() as TokenUsage);
-      }
-    } catch (error) {
-      console.error('Error fetching token balance:', error);
-    }
-  };
-
-  const checkEmailLimits = async (): Promise<boolean> => {
-    if (!auth.currentUser) return false;
-
-    try {
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      const todayISO = today.toISOString();
-
-      const thisMonth = new Date();
-      thisMonth.setDate(1);
-      thisMonth.setHours(0, 0, 0, 0);
-      const thisMonthISO = thisMonth.toISOString();
-
-      // Check daily limit (100 emails per day per user) - using simple query without composite index
-      const dailyQuery = query(
-        collection(db, 'emailLogs'),
-        where('userId', '==', auth.currentUser.uid)
-      );
-      const dailySnapshot = await getDocs(dailyQuery);
-      
-      // Filter by date in memory to avoid composite index requirement
-      const todayEmails = dailySnapshot.docs.filter(doc => {
-        const sentAt = doc.data().sentAt;
-        return sentAt >= todayISO;
-      });
-      
-      if (todayEmails.length >= 100) {
-        throw new Error('Limite diário de 100 emails atingido. Tente novamente amanhã.');
-      }
-
-      // Check monthly platform limit (3000 emails per month total) - using simple query
-      const monthlyQuery = query(
-        collection(db, 'emailLogs')
-      );
-      const monthlySnapshot = await getDocs(monthlyQuery);
-      
-      // Filter by date in memory to avoid composite index requirement
-      const thisMonthEmails = monthlySnapshot.docs.filter(doc => {
-        const sentAt = doc.data().sentAt;
-        return sentAt >= thisMonthISO;
-      });
-      
-      if (thisMonthEmails.length >= 3000) {
-        throw new Error('Limite mensal da plataforma de 3.000 emails atingido. Tente novamente no próximo mês.');
-      }
-
-      return true;
-    } catch (error) {
-      console.error('Error checking email limits:', error);
-      throw error;
-    }
-  };
-
-  const checkAndUpdateTokens = async (cost: number): Promise<boolean> => {
-    if (!auth.currentUser || !tokenUsage) return false;
-
-    const remainingTokens = tokenUsage.totalTokens - tokenUsage.usedTokens;
-    if (remainingTokens < cost) {
-      setShowInsufficientTokens(true);
-      return false;
-    }
-
-    await updateDoc(doc(db, 'tokenUsage', auth.currentUser.uid), {
-      usedTokens: tokenUsage.usedTokens + cost
-    });
-
-    setTokenUsage(prev => prev ? {
-      ...prev,
-      usedTokens: prev.usedTokens + cost
-    } : null);
-
-    return true;
-  };
 
   useEffect(() => {
-    const fetchUserData = async () => {
+    const fetchSenderName = async () => {
       if (!auth.currentUser) return;
       
       try {
         const userDoc = await getDoc(doc(db, 'users', auth.currentUser.uid));
         if (userDoc.exists()) {
-          const userData = userDoc.data();
-          setSenderName(userData.name || 'Equipe Gen.OI');
-          setCompanyName(userData.company || '');
+          setSenderName(userDoc.data().name || 'Equipe Gen.OI');
         }
       } catch (error) {
         console.error('Error fetching sender name:', error);
@@ -263,8 +107,7 @@ const NewMessageModal = ({
     };
 
     if (isOpen) {
-      fetchUserData();
-      fetchTokenBalance();
+      fetchSenderName();
       // Reset form when modal opens
       setNewMessage('');
       setEmailSubject('');
@@ -306,20 +149,7 @@ const NewMessageModal = ({
           return;
         }
 
-        // Check email limits
-        await checkEmailLimits();
-
-        // Check and update tokens
-        const hasTokens = await checkAndUpdateTokens(EMAIL_TOKEN_COST);
-        if (!hasTokens) {
-          setIsSending(false);
-          return;
-        }
-
-        // Create final subject with company and startup names
-        const finalSubject = `A ${companyName} deseja contatar a ${startupData.startupName} - ${emailSubject}`;
-
-        // Template HTML do email sem restrições de domínio
+        // Template HTML do email
         const htmlContent = `
           <!DOCTYPE html>
           <html>
@@ -344,7 +174,8 @@ const NewMessageModal = ({
                       
                       <div style="font-size: 14px; color: #666;">
                           <p><strong>Atenciosamente,</strong><br>
-                          Genie, sua agente IA de inovação aberta</p>
+                          ${senderName}<br>
+                          <em>Agente de Inovação Aberta - Gen.OI</em></p>
                           
                           <p style="margin-top: 20px;">
                               <strong>Gen.OI</strong><br>
@@ -358,13 +189,12 @@ const NewMessageModal = ({
               
               <div style="text-align: center; margin-top: 20px; font-size: 12px; color: #999;">
                   <p>Esta mensagem foi enviada através da plataforma Gen.OI de inovação aberta.</p>
-                  <p>Enviado por Gen.OI</p>
               </div>
           </body>
           </html>
         `;
 
-        // Enviar email usando a extensão oficial do MailerSend - sem restrições de domínio
+        // Enviar email usando a extensão oficial do MailerSend
         const emailDoc = await addDoc(collection(db, 'emails'), {
           to: [
             {
@@ -376,7 +206,7 @@ const NewMessageModal = ({
             email: 'contact@genoi.net',
             name: 'Gen.OI - Inovação Aberta'
           },
-          subject: finalSubject,
+          subject: emailSubject,
           html: htmlContent,
           text: newMessage.trim(),
           reply_to: {
@@ -394,15 +224,6 @@ const NewMessageModal = ({
           }
         });
 
-        // Log the email for tracking limits
-        await addDoc(collection(db, 'emailLogs'), {
-          userId: auth.currentUser.uid,
-          recipientEmail: selectedRecipientEmail,
-          sentAt: new Date().toISOString(),
-          emailDocId: emailDoc.id,
-          subject: finalSubject
-        });
-
         console.log('Email document created with ID:', emailDoc.id);
       }
 
@@ -416,7 +237,7 @@ const NewMessageModal = ({
         recipientName: selectedRecipient,
         recipientType: selectedRecipientType,
         recipientEmail: messageType === 'email' ? selectedRecipientEmail : undefined,
-        subject: messageType === 'email' ? `A ${companyName} deseja contatar a ${startupData.startupName} - ${emailSubject}` : undefined,
+        subject: messageType === 'email' ? emailSubject : undefined,
         status: 'sent'
       };
 
@@ -429,23 +250,26 @@ const NewMessageModal = ({
 
       onMessageSent(newCrmMessage);
       
-      // Reset form and close modal
+      // Reset form
       setNewMessage('');
       setEmailSubject('');
       setSelectedRecipient('');
       setSelectedRecipientEmail('');
       onClose();
 
+      // Show success message
+      if (messageType === 'email') {
+        alert(`Email enviado com sucesso!\n\nDe: contact@genoi.net\nPara: ${selectedRecipientEmail}\nAssunto: ${emailSubject}\n\nO email será processado pela extensão MailerSend.`);
+      } else {
+        alert('Mensagem WhatsApp registrada. Envie manualmente através do WhatsApp.');
+      }
+
     } catch (error: any) {
       console.error('Error sending message:', error);
       
       let errorMessage = 'Erro ao enviar mensagem. Tente novamente.';
       
-      if (error.message.includes('Limite diário')) {
-        errorMessage = error.message;
-      } else if (error.message.includes('Limite mensal')) {
-        errorMessage = error.message;
-      } else if (error.code === 'permission-denied') {
+      if (error.code === 'permission-denied') {
         errorMessage = 'Permissão negada. Verifique se a extensão MailerSend está instalada e configurada corretamente.';
       } else if (error.code === 'not-found') {
         errorMessage = 'Coleção "emails" não encontrada. Verifique se a extensão MailerSend está instalada.';
@@ -461,131 +285,115 @@ const NewMessageModal = ({
 
   if (!isOpen) return null;
 
-  const remainingTokens = tokenUsage ? tokenUsage.totalTokens - tokenUsage.usedTokens : 0;
-  const hasEnoughTokens = messageType === 'email' ? remainingTokens >= EMAIL_TOKEN_COST : true;
-
   return (
-    <>
-      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-        <div className="bg-gray-800 rounded-lg p-6 w-full max-w-2xl mx-4 max-h-[90vh] overflow-y-auto" style={{ userSelect: 'none' }}>
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-lg font-bold text-white">Nova Mensagem</h3>
-            <button
-              onClick={onClose}
-              className="text-gray-400 hover:text-white"
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+      <div className="bg-gray-800 rounded-lg p-6 w-full max-w-2xl mx-4 max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-bold text-white">Nova Mensagem</h3>
+          <button
+            onClick={onClose}
+            className="text-gray-400 hover:text-white"
+          >
+            <X size={20} />
+          </button>
+        </div>
+        
+        <div className="space-y-4">
+          <div className="flex gap-2">
+            <select
+              value={messageType}
+              onChange={(e) => setMessageType(e.target.value as 'email' | 'whatsapp')}
+              className="px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
-              <X size={20} />
-            </button>
+              <option value="email">Email</option>
+              <option value="whatsapp">WhatsApp</option>
+            </select>
+
+            <select
+              value={selectedRecipient}
+              onChange={(e) => handleRecipientChange(e.target.value)}
+              className="flex-1 px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="">Selecione o destinatário</option>
+              {startupData.email && (
+                <option value={startupData.startupName}>{startupData.startupName} (Geral)</option>
+              )}
+              {startupData.founders?.filter(founder => founder.name.trim() && (messageType === 'whatsapp' || founder.email.trim())).map((founder) => (
+                <option key={founder.id} value={founder.name}>
+                  {founder.name} {founder.cargo && `(${founder.cargo})`}
+                </option>
+              ))}
+            </select>
           </div>
-          
-          <div className="space-y-4">
-            <div className="flex gap-2">
-              <select
-                value={messageType}
-                onChange={(e) => setMessageType(e.target.value as 'email' | 'whatsapp')}
-                className="px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                style={{ userSelect: 'none' }}
-              >
-                <option value="email">Email</option>
-                <option value="whatsapp">WhatsApp</option>
-              </select>
 
-              <select
-                value={selectedRecipient}
-                onChange={(e) => handleRecipientChange(e.target.value)}
-                className="flex-1 px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                style={{ userSelect: 'none' }}
-              >
-                <option value="">Selecione o destinatário</option>
-                {startupData.email && (
-                  <option value={startupData.startupName}>{startupData.startupName} (Geral)</option>
-                )}
-                {startupData.founders?.filter(founder => founder.name.trim() && (messageType === 'whatsapp' || founder.email.trim())).map((founder) => (
-                  <option key={founder.id} value={founder.name}>
-                    {founder.name} {founder.cargo && `(${founder.cargo})`}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {messageType === 'email' && tokenUsage && (
-              <div className={`text-sm p-3 rounded border ${
-                hasEnoughTokens 
-                  ? 'bg-blue-900/20 border-blue-700 text-blue-200' 
-                  : 'bg-red-900/20 border-red-700 text-red-200'
-              }`}>
-                <div className="flex items-center justify-between">
-                  <span>Custo: {EMAIL_TOKEN_COST} tokens</span>
-                  <span>Saldo: {remainingTokens} tokens</span>
-                </div>
-                {!hasEnoughTokens && (
-                  <div className="mt-1 text-xs">
-                    ⚠️ Tokens insuficientes para enviar email
-                  </div>
-                )}
-              </div>
-            )}
-
-            {messageType === 'email' && (
-              <div>
-                <label className="block text-sm text-gray-300 mb-1">Assunto do Email *</label>
-                <input
-                  type="text"
-                  value={emailSubject}
-                  onChange={(e) => setEmailSubject(e.target.value)}
-                  placeholder="Digite o assunto do email..."
-                  className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  style={{ userSelect: 'none' }}
-                  required
-                />
-              </div>
-            )}
-
+          {messageType === 'email' && (
             <div>
-              <label className="block text-sm text-gray-300 mb-1">
-                {messageType === 'email' ? 'Conteúdo do Email' : 'Mensagem WhatsApp'}
-              </label>
-              <textarea
-                value={newMessage}
-                onChange={(e) => setNewMessage(e.target.value)}
-                placeholder={messageType === 'email' ? 'Digite o conteúdo do email...' : 'Digite sua mensagem...'}
-                rows={6}
-                className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
-                style={{ userSelect: 'none' }}
+              <label className="block text-sm text-gray-300 mb-1">Assunto do Email *</label>
+              <input
+                type="text"
+                value={emailSubject}
+                onChange={(e) => setEmailSubject(e.target.value)}
+                placeholder="Digite o assunto do email..."
+                className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                required
               />
             </div>
+          )}
 
-            <div className="flex gap-2">
-              <button
-                onClick={handleSendMessage}
-                disabled={!newMessage.trim() || !selectedRecipient || isSending || (messageType === 'email' && (!emailSubject.trim() || !selectedRecipientEmail || !hasEnoughTokens))}
-                className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg text-white font-medium"
-              >
-                {isSending ? (
-                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                ) : (
-                  <Send size={16} />
-                )}
-                {isSending ? 'Enviando...' : messageType === 'email' ? 'Enviar Email' : 'Registrar WhatsApp'}
-              </button>
-              <button
-                onClick={onClose}
-                className="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-white font-medium"
-              >
-                Cancelar
-              </button>
+          {selectedRecipientEmail && messageType === 'email' && (
+            <div className="text-sm text-gray-400 bg-gray-700 p-2 rounded">
+              📧 Será enviado para: <strong>{selectedRecipientEmail}</strong>
             </div>
+          )}
+
+          <div>
+            <label className="block text-sm text-gray-300 mb-1">
+              {messageType === 'email' ? 'Conteúdo do Email' : 'Mensagem WhatsApp'}
+            </label>
+            <textarea
+              value={newMessage}
+              onChange={(e) => setNewMessage(e.target.value)}
+              placeholder={messageType === 'email' ? 'Digite o conteúdo do email...' : 'Digite sua mensagem...'}
+              rows={6}
+              className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+
+          {messageType === 'email' && (
+            <div className="text-xs text-gray-400 bg-gray-700 p-3 rounded">
+              <strong>ℹ️ Configuração do Email:</strong>
+              <ul className="mt-1 space-y-1">
+                <li>• <strong>Remetente:</strong> contact@genoi.net ({senderName})</li>
+                <li>• <strong>Responder para:</strong> contact@genoi.net</li>
+                <li>• <strong>Processamento:</strong> Extensão oficial MailerSend</li>
+                <li>• O email será formatado automaticamente com a identidade visual da Gen.OI</li>
+              </ul>
+            </div>
+          )}
+
+          <div className="flex gap-2">
+            <button
+              onClick={handleSendMessage}
+              disabled={!newMessage.trim() || !selectedRecipient || isSending || (messageType === 'email' && (!emailSubject.trim() || !selectedRecipientEmail))}
+              className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg text-white font-medium"
+            >
+              {isSending ? (
+                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+              ) : (
+                <Send size={16} />
+              )}
+              {isSending ? 'Enviando...' : messageType === 'email' ? 'Enviar Email' : 'Registrar WhatsApp'}
+            </button>
+            <button
+              onClick={onClose}
+              className="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-white font-medium"
+            >
+              Cancelar
+            </button>
           </div>
         </div>
       </div>
-
-      <InsufficientTokensModal
-        isOpen={showInsufficientTokens}
-        onClose={() => setShowInsufficientTokens(false)}
-        requiredTokens={EMAIL_TOKEN_COST}
-        currentTokens={remainingTokens}
-      />
-    </>
+    </div>
   );
 };
 
@@ -880,7 +688,7 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
   }
 
   return (
-    <div className="min-h-screen bg-black" style={{ userSelect: 'none' }}>
+    <div className="min-h-screen bg-black">
       {/* Header */}
       <div className="flex flex-col p-3 border-b border-gray-700">
         <div className="flex items-center justify-between">
@@ -918,7 +726,6 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
                     readOnly
                     className="w-full px-3 py-2 bg-gray-600 border border-gray-500 rounded text-gray-300 cursor-not-allowed opacity-75"
                     title="Este campo não pode ser editado"
-                    style={{ userSelect: 'none' }}
                   />
                 </div>
 
@@ -931,7 +738,6 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
                       onChange={(e) => setStartupData(prev => prev ? { ...prev, email: e.target.value } : null)}
                       onBlur={(e) => handleFieldBlur('email', e.target.value)}
                       className="flex-1 px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      style={{ userSelect: 'none' }}
                     />
                     {startupData.email && (
                       <button
@@ -955,7 +761,6 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
                       onBlur={(e) => handleFieldBlur('whatsapp', e.target.value)}
                       className="flex-1 px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                       placeholder="+55 11 99999-9999"
-                      style={{ userSelect: 'none' }}
                     />
                     {startupData.whatsapp && (
                       <button
@@ -978,7 +783,6 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
                       onChange={(e) => setStartupData(prev => prev ? { ...prev, website: e.target.value } : null)}
                       onBlur={(e) => handleFieldBlur('website', e.target.value)}
                       className="flex-1 px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      style={{ userSelect: 'none' }}
                     />
                     {startupData.website && (
                       <a
@@ -1002,7 +806,6 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
                       onChange={(e) => setStartupData(prev => prev ? { ...prev, linkedin: e.target.value } : null)}
                       onBlur={(e) => handleFieldBlur('linkedin', e.target.value)}
                       className="flex-1 px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      style={{ userSelect: 'none' }}
                     />
                     {startupData.linkedin && (
                       <a
@@ -1025,7 +828,6 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
                     rows={3}
                     className="w-full px-3 py-2 bg-gray-600 border border-gray-500 rounded text-gray-300 resize-none cursor-not-allowed opacity-75"
                     title="Este campo não pode ser editado"
-                    style={{ userSelect: 'none' }}
                   />
                 </div>
 
@@ -1087,7 +889,6 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
                           onBlur={(e) => handleFounderFieldBlur(founder.id, 'name', e.target.value)}
                           className="w-full px-2 py-1 bg-gray-700 border border-gray-600 rounded text-white text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
                           placeholder="Nome do fundador"
-                          style={{ userSelect: 'none' }}
                           required
                         />
                       </div>
@@ -1107,7 +908,6 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
                             onBlur={(e) => handleFounderFieldBlur(founder.id, 'email', e.target.value)}
                             className="flex-1 px-2 py-1 bg-gray-700 border border-gray-600 rounded text-white text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
                             placeholder="email@exemplo.com"
-                            style={{ userSelect: 'none' }}
                           />
                           {founder.email && (
                             <button
@@ -1136,7 +936,6 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
                             onBlur={(e) => handleFounderFieldBlur(founder.id, 'whatsapp', e.target.value)}
                             className="flex-1 px-2 py-1 bg-gray-700 border border-gray-600 rounded text-white text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
                             placeholder="+55 11 99999-9999"
-                            style={{ userSelect: 'none' }}
                           />
                           {founder.whatsapp && (
                             <button
@@ -1165,7 +964,6 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
                             onBlur={(e) => handleFounderFieldBlur(founder.id, 'linkedin', e.target.value)}
                             className="flex-1 px-2 py-1 bg-gray-700 border border-gray-600 rounded text-white text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
                             placeholder="https://linkedin.com/in/..."
-                            style={{ userSelect: 'none' }}
                           />
                           {founder.linkedin && (
                             <a
@@ -1196,7 +994,6 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
                             onBlur={(e) => handleFounderFieldBlur(founder.id, 'cargo', e.target.value)}
                             className="flex-1 px-2 py-1 bg-gray-700 border border-gray-600 rounded text-white text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
                             placeholder="CEO, CTO, Fundador..."
-                            style={{ userSelect: 'none' }}
                           />
                         </div>
                       </div>
@@ -1265,7 +1062,7 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
                         )}
                         {message.status === 'sent' && message.type === 'email' && (
                           <span className="text-green-400 text-xs bg-green-900/20 px-2 py-1 rounded">
-                            Enviado por Gen.OI
+                            Enviado via MailerSend
                           </span>
                         )}
                         {message.status === 'delivered' && (
@@ -1280,7 +1077,12 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
                     </div>
                     {message.subject && (
                       <div className="text-blue-300 font-medium mb-2">
-                        {message.subject}
+                        Assunto: {message.subject}
+                      </div>
+                    )}
+                    {message.recipientEmail && (
+                      <div className="text-gray-400 text-sm mb-2">
+                        📧 {message.recipientEmail}
                       </div>
                     )}
                     <p className="text-gray-300 whitespace-pre-wrap">{message.content}</p>
