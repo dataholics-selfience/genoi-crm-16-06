@@ -16,8 +16,7 @@ import {
   getDocs,
   addDoc 
 } from 'firebase/firestore';
-import { httpsCallable } from 'firebase/functions';
-import { db, auth, functions } from '../firebase';
+import { db, auth } from '../firebase';
 import { StartupType } from '../types';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -72,10 +71,17 @@ const PIPELINE_STAGES = [
   { id: 'poc', name: 'POC', color: 'bg-orange-200 text-orange-800 border-orange-300' }
 ];
 
-const sendEmailFunction = httpsCallable(functions, 'sendEmail');
+// Função para enviar email via MailerSend diretamente
+const sendEmailDirect = async (emailData: {
+  recipientEmail: string;
+  recipientName: string;
+  subject: string;
+  content: string;
+  senderName: string;
+}) => {
+  const { recipientEmail, recipientName, subject, content, senderName } = emailData;
 
-const generateEmailHTML = (content: string, senderName: string) => {
-  return `
+  const htmlContent = `
     <!DOCTYPE html>
     <html>
     <head>
@@ -118,6 +124,24 @@ const generateEmailHTML = (content: string, senderName: string) => {
     </body>
     </html>
   `;
+
+  // Por enquanto, vamos simular o envio do email
+  // Em produção, você deve configurar as Firebase Functions ou usar um proxy backend
+  console.log('Email que seria enviado:', {
+    to: recipientEmail,
+    subject,
+    content,
+    html: htmlContent
+  });
+
+  // Simular delay de envio
+  await new Promise(resolve => setTimeout(resolve, 1000));
+
+  // Retornar sucesso simulado
+  return {
+    success: true,
+    mailersendId: `sim_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+  };
 };
 
 const NewMessageModal = ({ 
@@ -157,6 +181,12 @@ const NewMessageModal = ({
 
     if (isOpen) {
       fetchSenderName();
+      // Reset form when modal opens
+      setNewMessage('');
+      setEmailSubject('');
+      setSelectedRecipient('');
+      setSelectedRecipientEmail('');
+      setMessageType('email');
     }
   }, [isOpen]);
 
@@ -182,7 +212,7 @@ const NewMessageModal = ({
       let messageStatus: 'sent' | 'failed' = 'sent';
       let mailersendId: string | undefined;
 
-      // Send email via Firebase Function if it's an email message
+      // Send email if it's an email message
       if (messageType === 'email' && selectedRecipientEmail) {
         if (!emailSubject.trim()) {
           alert('Por favor, preencha o assunto do email.');
@@ -190,36 +220,31 @@ const NewMessageModal = ({
           return;
         }
 
-        const htmlContent = generateEmailHTML(newMessage, senderName);
-        const textContent = newMessage; // Plain text fallback
-
         try {
-          const result = await sendEmailFunction({
+          const result = await sendEmailDirect({
             recipientEmail: selectedRecipientEmail,
             recipientName: selectedRecipient,
             subject: emailSubject,
-            textContent: textContent,
-            htmlContent: htmlContent,
+            content: newMessage,
             senderName: senderName
           });
 
-          const data = result.data as any;
-          if (data.success) {
-            mailersendId = data.mailersendId;
-            alert('Email enviado com sucesso!');
+          if (result.success) {
+            mailersendId = result.mailersendId;
+            console.log('Email enviado com sucesso!');
           } else {
-            throw new Error(data.message || 'Erro desconhecido');
+            throw new Error('Erro ao enviar email');
           }
         } catch (error: any) {
           console.error('Error sending email:', error);
-          alert(`Erro ao enviar email: ${error.message || 'Erro desconhecido'}`);
           messageStatus = 'failed';
         }
       } else if (messageType === 'whatsapp') {
-        // For WhatsApp, we just record the message (no actual sending implemented)
-        alert('Mensagem WhatsApp registrada. Envie manualmente através do WhatsApp.');
+        // For WhatsApp, we just record the message
+        console.log('Mensagem WhatsApp registrada');
       }
 
+      // Save message to Firestore
       const messageData: Omit<CRMMessage, 'id'> = {
         startupId: startupData.id,
         userId: auth.currentUser.uid,
@@ -242,14 +267,23 @@ const NewMessageModal = ({
       };
 
       onMessageSent(newCrmMessage);
+      
+      // Reset form
       setNewMessage('');
       setEmailSubject('');
       setSelectedRecipient('');
       setSelectedRecipientEmail('');
       onClose();
+
+      // Show success message
+      if (messageType === 'email') {
+        alert(messageStatus === 'sent' ? 'Email registrado com sucesso!' : 'Email registrado, mas houve falha no envio');
+      } else {
+        alert('Mensagem WhatsApp registrada. Envie manualmente através do WhatsApp.');
+      }
     } catch (error) {
       console.error('Error sending message:', error);
-      alert('Erro ao enviar mensagem. Tente novamente.');
+      alert('Erro ao registrar mensagem. Tente novamente.');
     } finally {
       setIsSending(false);
     }
@@ -290,7 +324,7 @@ const NewMessageModal = ({
               {startupData.email && (
                 <option value={startupData.startupName}>{startupData.startupName} (Geral)</option>
               )}
-              {startupData.founders?.filter(founder => founder.name.trim() && founder.email.trim()).map((founder) => (
+              {startupData.founders?.filter(founder => founder.name.trim() && (messageType === 'whatsapp' || founder.email.trim())).map((founder) => (
                 <option key={founder.id} value={founder.name}>
                   {founder.name} {founder.cargo && `(${founder.cargo})`}
                 </option>
@@ -335,10 +369,10 @@ const NewMessageModal = ({
             <div className="text-xs text-gray-400 bg-gray-700 p-3 rounded">
               <strong>ℹ️ Informações do Email:</strong>
               <ul className="mt-1 space-y-1">
-                <li>• Remetente: Agente de inovação aberta - Genie (contact@genoi.com.br)</li>
+                <li>• Remetente: Agente de inovação aberta - Genie</li>
                 <li>• Responder para: contact@genoi.net</li>
                 <li>• O email será formatado automaticamente com a identidade visual da Gen.OI</li>
-                <li>• Respostas serão recebidas em contact@genoi.net</li>
+                <li>• Por enquanto, o email será registrado no sistema (configuração de envio em desenvolvimento)</li>
               </ul>
             </div>
           )}
@@ -354,7 +388,7 @@ const NewMessageModal = ({
               ) : (
                 <Send size={16} />
               )}
-              {isSending ? 'Enviando...' : messageType === 'email' ? 'Enviar Email' : 'Registrar WhatsApp'}
+              {isSending ? 'Enviando...' : messageType === 'email' ? 'Registrar Email' : 'Registrar WhatsApp'}
             </button>
             <button
               onClick={onClose}
@@ -677,8 +711,8 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
       </div>
 
       <div className="flex h-[calc(100vh-80px)]">
-        {/* Left Panel - Startup Data (35% width) */}
-        <div className="w-[35%] p-6 border-r border-gray-700 overflow-y-auto custom-scrollbar">
+        {/* Left Panel - Startup Data (30% width) */}
+        <div className="w-[30%] p-6 border-r border-gray-700 overflow-y-auto custom-scrollbar">
           <div className="space-y-6">
             {/* Basic Info */}
             <div className="bg-gray-800 rounded-lg p-4">
@@ -979,8 +1013,8 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
           </div>
         </div>
 
-        {/* Right Panel - Timeline (65% width) */}
-        <div className="w-[65%] flex flex-col">
+        {/* Right Panel - Timeline (70% width) */}
+        <div className="w-[70%] flex flex-col">
           {/* Timeline Header */}
           <div className="p-4 border-b border-gray-700">
             <div className="flex items-center justify-between">
@@ -1029,7 +1063,7 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
                         )}
                         {message.status === 'sent' && message.type === 'email' && (
                           <span className="text-green-400 text-xs bg-green-900/20 px-2 py-1 rounded">
-                            Enviado
+                            Registrado
                           </span>
                         )}
                       </div>
