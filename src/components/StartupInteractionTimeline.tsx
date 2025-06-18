@@ -90,24 +90,28 @@ const NewMessageModal = ({
   const [emailSubject, setEmailSubject] = useState('');
   const [isSending, setIsSending] = useState(false);
   const [senderName, setSenderName] = useState('');
+  const [userCompany, setUserCompany] = useState('');
 
   useEffect(() => {
-    const fetchSenderName = async () => {
+    const fetchUserData = async () => {
       if (!auth.currentUser) return;
       
       try {
         const userDoc = await getDoc(doc(db, 'users', auth.currentUser.uid));
         if (userDoc.exists()) {
-          setSenderName(userDoc.data().name || 'Equipe Gen.OI');
+          const userData = userDoc.data();
+          setSenderName(userData.name || 'Equipe Gen.OI');
+          setUserCompany(userData.company || 'Gen.OI');
         }
       } catch (error) {
-        console.error('Error fetching sender name:', error);
+        console.error('Error fetching user data:', error);
         setSenderName('Equipe Gen.OI');
+        setUserCompany('Gen.OI');
       }
     };
 
     if (isOpen) {
-      fetchSenderName();
+      fetchUserData();
       // Reset form when modal opens
       setNewMessage('');
       setEmailSubject('');
@@ -148,6 +152,9 @@ const NewMessageModal = ({
           setIsSending(false);
           return;
         }
+
+        // Criar assunto dinâmico
+        const dynamicSubject = `A ${userCompany} deseja contatar a ${startupData.startupName} - ${emailSubject}`;
 
         // Template HTML do email
         const htmlContent = `
@@ -206,22 +213,14 @@ const NewMessageModal = ({
             email: 'contact@genoi.net',
             name: 'Gen.OI - Inovação Aberta'
           },
-          subject: emailSubject,
+          subject: dynamicSubject,
           html: htmlContent,
           text: newMessage.trim(),
           reply_to: {
             email: 'contact@genoi.net',
             name: 'Gen.OI - Suporte'
           },
-          tags: ['crm', 'startup-interaction'],
-          // Metadados para rastreamento
-          metadata: {
-            startupId: startupData.id,
-            userId: auth.currentUser.uid,
-            recipientType: selectedRecipientType,
-            senderName: senderName,
-            timestamp: new Date().toISOString()
-          }
+          tags: ['crm', 'startup-interaction']
         });
       }
 
@@ -235,7 +234,7 @@ const NewMessageModal = ({
         recipientName: selectedRecipient,
         recipientType: selectedRecipientType,
         recipientEmail: messageType === 'email' ? selectedRecipientEmail : undefined,
-        subject: messageType === 'email' ? emailSubject : undefined,
+        subject: messageType === 'email' ? `A ${userCompany} deseja contatar a ${startupData.startupName} - ${emailSubject}` : undefined,
         status: 'sent'
       };
 
@@ -257,18 +256,6 @@ const NewMessageModal = ({
 
     } catch (error: any) {
       console.error('Error sending message:', error);
-      
-      let errorMessage = 'Erro ao enviar mensagem. Tente novamente.';
-      
-      if (error.code === 'permission-denied') {
-        errorMessage = 'Permissão negada. Verifique se a extensão MailerSend está instalada e configurada corretamente.';
-      } else if (error.code === 'not-found') {
-        errorMessage = 'Coleção "emails" não encontrada. Verifique se a extensão MailerSend está instalada.';
-      } else if (error.message) {
-        errorMessage = `Erro: ${error.message}`;
-      }
-      
-      alert(errorMessage);
     } finally {
       setIsSending(false);
     }
@@ -320,6 +307,9 @@ const NewMessageModal = ({
           {messageType === 'email' && (
             <div>
               <label className="block text-sm text-gray-300 mb-1">Assunto do Email *</label>
+              <div className="text-xs text-gray-400 mb-2">
+                Será enviado como: "A {userCompany} deseja contatar a {startupData.startupName} - [seu assunto]"
+              </div>
               <input
                 type="text"
                 value={emailSubject}
