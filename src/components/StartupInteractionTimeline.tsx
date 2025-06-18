@@ -3,7 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { 
   ArrowLeft, Mail, Globe, Linkedin, Phone, User, Building2, 
   Calendar, Edit3, Save, X, Plus, Send, MessageSquare, 
-  ExternalLink, Users, Briefcase, ChevronLeft, ChevronRight
+  ExternalLink, Users, Briefcase, ChevronLeft, ChevronRight,
+  AlertTriangle
 } from 'lucide-react';
 import { 
   doc, 
@@ -75,6 +76,62 @@ const EMAIL_TOKEN_COST = 10;
 const DAILY_EMAIL_LIMIT = 100;
 const MONTHLY_EMAIL_LIMIT = 3000;
 
+const InsufficientTokensModal = ({ 
+  isOpen, 
+  onClose, 
+  remainingTokens 
+}: {
+  isOpen: boolean;
+  onClose: () => void;
+  remainingTokens: number;
+}) => {
+  const navigate = useNavigate();
+
+  const handleUpgrade = () => {
+    navigate('/plans');
+    onClose();
+  };
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+      <div className="bg-gray-800 rounded-lg p-6 w-full max-w-md mx-4">
+        <div className="flex items-center gap-3 mb-4">
+          <AlertTriangle className="text-yellow-400" size={24} />
+          <h3 className="text-lg font-bold text-white">Tokens Insuficientes</h3>
+        </div>
+        
+        <div className="space-y-4 text-gray-300">
+          <p>
+            Você precisa de <span className="font-bold text-white">{EMAIL_TOKEN_COST} tokens</span> para enviar um email, 
+            mas possui apenas <span className="font-bold text-white">{remainingTokens} tokens</span> disponíveis.
+          </p>
+          
+          <p>
+            Para continuar enviando emails, você precisa fazer upgrade do seu plano ou aguardar a renovação dos seus tokens.
+          </p>
+        </div>
+
+        <div className="flex gap-3 mt-6">
+          <button
+            onClick={handleUpgrade}
+            className="flex-1 px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg text-white font-medium transition-colors"
+          >
+            Ver Planos
+          </button>
+          <button
+            onClick={onClose}
+            className="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-white font-medium transition-colors"
+          >
+            Fechar
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const NewMessageModal = ({ 
   isOpen, 
   onClose, 
@@ -94,6 +151,8 @@ const NewMessageModal = ({
   const [emailSubject, setEmailSubject] = useState('');
   const [isSending, setIsSending] = useState(false);
   const [userCompany, setUserCompany] = useState('');
+  const [showInsufficientTokensModal, setShowInsufficientTokensModal] = useState(false);
+  const [remainingTokens, setRemainingTokens] = useState(0);
 
   useEffect(() => {
     const fetchUserCompany = async () => {
@@ -110,8 +169,25 @@ const NewMessageModal = ({
       }
     };
 
+    const fetchTokenBalance = async () => {
+      if (!auth.currentUser) return;
+      
+      try {
+        const tokenDoc = await getDoc(doc(db, 'tokenUsage', auth.currentUser.uid));
+        if (tokenDoc.exists()) {
+          const tokenUsage = tokenDoc.data();
+          const remaining = tokenUsage.totalTokens - tokenUsage.usedTokens;
+          setRemainingTokens(Math.max(0, remaining));
+        }
+      } catch (error) {
+        console.error('Error fetching token balance:', error);
+        setRemainingTokens(0);
+      }
+    };
+
     if (isOpen) {
       fetchUserCompany();
+      fetchTokenBalance();
       // Reset form when modal opens
       setNewMessage('');
       setEmailSubject('');
@@ -180,13 +256,19 @@ const NewMessageModal = ({
 
     try {
       const tokenDoc = await getDoc(doc(db, 'tokenUsage', auth.currentUser.uid));
-      if (!tokenDoc.exists()) return false;
+      if (!tokenDoc.exists()) {
+        setRemainingTokens(0);
+        setShowInsufficientTokensModal(true);
+        return false;
+      }
 
       const tokenUsage = tokenDoc.data();
       const remainingTokens = tokenUsage.totalTokens - tokenUsage.usedTokens;
 
       if (remainingTokens < EMAIL_TOKEN_COST) {
-        throw new Error(`Tokens insuficientes. Você precisa de ${EMAIL_TOKEN_COST} tokens para enviar um email.`);
+        setRemainingTokens(Math.max(0, remainingTokens));
+        setShowInsufficientTokensModal(true);
+        return false;
       }
 
       await updateDoc(doc(db, 'tokenUsage', auth.currentUser.uid), {
@@ -218,8 +300,12 @@ const NewMessageModal = ({
         // Check email limits
         await checkEmailLimits();
 
-        // Check and update tokens
-        await checkAndUpdateTokens();
+        // Check and update tokens - this will show the modal if insufficient
+        const hasEnoughTokens = await checkAndUpdateTokens();
+        if (!hasEnoughTokens) {
+          setIsSending(false);
+          return; // Stop execution, modal will be shown
+        }
 
         // Create final subject with company and startup names
         const finalSubject = `A ${userCompany} deseja contatar a ${startupData.startupName} - ${emailSubject}`;
@@ -359,60 +445,102 @@ const NewMessageModal = ({
 
   if (!isOpen) return null;
 
+  const hasInsufficientTokens = messageType === 'email' && remainingTokens < EMAIL_TOKEN_COST;
+
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-gray-800 rounded-lg p-6 w-full max-w-2xl mx-4 max-h-[90vh] overflow-y-auto select-none" style={{ userSelect: 'none', WebkitUserSelect: 'none', MozUserSelect: 'none', msUserSelect: 'none' }}>
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-bold text-white">Nova Mensagem</h3>
-          <button
-            onClick={onClose}
-            className="text-gray-400 hover:text-white"
-          >
-            <X size={20} />
-          </button>
-        </div>
-        
-        <div className="space-y-4">
-          <div className="flex gap-2">
-            <select
-              value={messageType}
-              onChange={(e) => setMessageType(e.target.value as 'email' | 'whatsapp')}
-              className="px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:outline-none focus:ring-2 focus:ring-blue-500 select-none"
-              style={{ userSelect: 'none' }}
+    <>
+      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <div className="bg-gray-800 rounded-lg p-6 w-full max-w-2xl mx-4 max-h-[90vh] overflow-y-auto select-none" style={{ userSelect: 'none', WebkitUserSelect: 'none', MozUserSelect: 'none', msUserSelect: 'none' }}>
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-bold text-white">Nova Mensagem</h3>
+            <button
+              onClick={onClose}
+              className="text-gray-400 hover:text-white"
             >
-              <option value="email">Email</option>
-              <option value="whatsapp">WhatsApp</option>
-            </select>
-
-            <select
-              value={selectedRecipient}
-              onChange={(e) => handleRecipientChange(e.target.value)}
-              className="flex-1 px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:outline-none focus:ring-2 focus:ring-blue-500 select-none"
-              style={{ userSelect: 'none' }}
-            >
-              <option value="">Selecione o destinatário</option>
-              {startupData.email && (
-                <option value={startupData.startupName}>{startupData.startupName} (Geral)</option>
-              )}
-              {startupData.founders?.filter(founder => founder.name.trim() && (messageType === 'whatsapp' || founder.email.trim())).map((founder) => (
-                <option key={founder.id} value={founder.name}>
-                  {founder.name} {founder.cargo && `(${founder.cargo})`}
-                </option>
-              ))}
-            </select>
+              <X size={20} />
+            </button>
           </div>
-
-          {messageType === 'email' && (
-            <div>
-              <label className="block text-sm text-gray-300 mb-1">Assunto do Email *</label>
-              <input
-                type="text"
-                value={emailSubject}
-                onChange={(e) => setEmailSubject(e.target.value)}
-                placeholder="Digite o assunto do email..."
-                className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:outline-none focus:ring-2 focus:ring-blue-500 select-none"
+          
+          <div className="space-y-4">
+            <div className="flex gap-2">
+              <select
+                value={messageType}
+                onChange={(e) => setMessageType(e.target.value as 'email' | 'whatsapp')}
+                className="px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:outline-none focus:ring-2 focus:ring-blue-500 select-none"
                 style={{ userSelect: 'none' }}
-                required
+              >
+                <option value="email">Email</option>
+                <option value="whatsapp">WhatsApp</option>
+              </select>
+
+              <select
+                value={selectedRecipient}
+                onChange={(e) => handleRecipientChange(e.target.value)}
+                className="flex-1 px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:outline-none focus:ring-2 focus:ring-blue-500 select-none"
+                style={{ userSelect: 'none' }}
+              >
+                <option value="">Selecione o destinatário</option>
+                {startupData.email && (
+                  <option value={startupData.startupName}>{startupData.startupName} (Geral)</option>
+                )}
+                {startupData.founders?.filter(founder => founder.name.trim() && (messageType === 'whatsapp' || founder.email.trim())).map((founder) => (
+                  <option key={founder.id} value={founder.name}>
+                    {founder.name} {founder.cargo && `(${founder.cargo})`}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Token warning for email */}
+            {messageType === 'email' && (
+              <div className={`p-3 rounded-lg border ${hasInsufficientTokens ? 'bg-red-900/20 border-red-600' : 'bg-blue-900/20 border-blue-600'}`}>
+                <div className="flex items-center gap-2 text-sm">
+                  {hasInsufficientTokens ? (
+                    <AlertTriangle size={16} className="text-red-400" />
+                  ) : (
+                    <Mail size={16} className="text-blue-400" />
+                  )}
+                  <span className={hasInsufficientTokens ? 'text-red-300' : 'text-blue-300'}>
+                    {hasInsufficientTokens 
+                      ? `Tokens insuficientes: ${remainingTokens}/${EMAIL_TOKEN_COST} necessários`
+                      : `Custo: ${EMAIL_TOKEN_COST} tokens (${remainingTokens} disponíveis)`
+                    }
+                  </span>
+                </div>
+              </div>
+            )}
+
+            {messageType === 'email' && (
+              <div>
+                <label className="block text-sm text-gray-300 mb-1">Assunto do Email *</label>
+                <input
+                  type="text"
+                  value={emailSubject}
+                  onChange={(e) => setEmailSubject(e.target.value)}
+                  placeholder="Digite o assunto do email..."
+                  className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:outline-none focus:ring-2 focus:ring-blue-500 select-none"
+                  style={{ userSelect: 'none' }}
+                  required
+                  onCopy={(e) => e.preventDefault()}
+                  onCut={(e) => e.preventDefault()}
+                  onPaste={(e) => e.preventDefault()}
+                  onDragStart={(e) => e.preventDefault()}
+                  onSelectStart={(e) => e.preventDefault()}
+                />
+              </div>
+            )}
+
+            <div>
+              <label className="block text-sm text-gray-300 mb-1">
+                {messageType === 'email' ? 'Conteúdo do Email' : 'Mensagem WhatsApp'}
+              </label>
+              <textarea
+                value={newMessage}
+                onChange={(e) => setNewMessage(e.target.value)}
+                placeholder={messageType === 'email' ? 'Digite o conteúdo do email...' : 'Digite sua mensagem...'}
+                rows={6}
+                className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 select-none"
+                style={{ userSelect: 'none' }}
                 onCopy={(e) => e.preventDefault()}
                 onCut={(e) => e.preventDefault()}
                 onPaste={(e) => e.preventDefault()}
@@ -420,52 +548,39 @@ const NewMessageModal = ({
                 onSelectStart={(e) => e.preventDefault()}
               />
             </div>
-          )}
 
-          <div>
-            <label className="block text-sm text-gray-300 mb-1">
-              {messageType === 'email' ? 'Conteúdo do Email' : 'Mensagem WhatsApp'}
-            </label>
-            <textarea
-              value={newMessage}
-              onChange={(e) => setNewMessage(e.target.value)}
-              placeholder={messageType === 'email' ? 'Digite o conteúdo do email...' : 'Digite sua mensagem...'}
-              rows={6}
-              className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 select-none"
-              style={{ userSelect: 'none' }}
-              onCopy={(e) => e.preventDefault()}
-              onCut={(e) => e.preventDefault()}
-              onPaste={(e) => e.preventDefault()}
-              onDragStart={(e) => e.preventDefault()}
-              onSelectStart={(e) => e.preventDefault()}
-            />
-          </div>
-
-          <div className="flex gap-2">
-            <button
-              onClick={handleSendMessage}
-              disabled={!newMessage.trim() || !selectedRecipient || isSending || (messageType === 'email' && (!emailSubject.trim() || !selectedRecipientEmail))}
-              className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg text-white font-medium select-none"
-              style={{ userSelect: 'none' }}
-            >
-              {isSending ? (
-                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-              ) : (
-                <Send size={16} />
-              )}
-              {isSending ? 'Enviando...' : messageType === 'email' ? 'Enviar Email' : 'Registrar WhatsApp'}
-            </button>
-            <button
-              onClick={onClose}
-              className="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-white font-medium select-none"
-              style={{ userSelect: 'none' }}
-            >
-              Cancelar
-            </button>
+            <div className="flex gap-2">
+              <button
+                onClick={handleSendMessage}
+                disabled={!newMessage.trim() || !selectedRecipient || isSending || (messageType === 'email' && (!emailSubject.trim() || !selectedRecipientEmail || hasInsufficientTokens))}
+                className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg text-white font-medium select-none"
+                style={{ userSelect: 'none' }}
+              >
+                {isSending ? (
+                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                ) : (
+                  <Send size={16} />
+                )}
+                {isSending ? 'Enviando...' : messageType === 'email' ? 'Enviar Email' : 'Registrar WhatsApp'}
+              </button>
+              <button
+                onClick={onClose}
+                className="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-white font-medium select-none"
+                style={{ userSelect: 'none' }}
+              >
+                Cancelar
+              </button>
+            </div>
           </div>
         </div>
       </div>
-    </div>
+
+      <InsufficientTokensModal
+        isOpen={showInsufficientTokensModal}
+        onClose={() => setShowInsufficientTokensModal(false)}
+        remainingTokens={remainingTokens}
+      />
+    </>
   );
 };
 
