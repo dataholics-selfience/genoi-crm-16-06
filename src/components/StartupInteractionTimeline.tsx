@@ -184,26 +184,36 @@ const NewMessageModal = ({
       thisMonth.setHours(0, 0, 0, 0);
       const thisMonthISO = thisMonth.toISOString();
 
-      // Check daily limit (100 emails per day per user)
+      // Check daily limit (100 emails per day per user) - using simple query without composite index
       const dailyQuery = query(
         collection(db, 'emailLogs'),
-        where('userId', '==', auth.currentUser.uid),
-        where('sentAt', '>=', todayISO)
+        where('userId', '==', auth.currentUser.uid)
       );
       const dailySnapshot = await getDocs(dailyQuery);
       
-      if (dailySnapshot.size >= 100) {
+      // Filter by date in memory to avoid composite index requirement
+      const todayEmails = dailySnapshot.docs.filter(doc => {
+        const sentAt = doc.data().sentAt;
+        return sentAt >= todayISO;
+      });
+      
+      if (todayEmails.length >= 100) {
         throw new Error('Limite diário de 100 emails atingido. Tente novamente amanhã.');
       }
 
-      // Check monthly platform limit (3000 emails per month total)
+      // Check monthly platform limit (3000 emails per month total) - using simple query
       const monthlyQuery = query(
-        collection(db, 'emailLogs'),
-        where('sentAt', '>=', thisMonthISO)
+        collection(db, 'emailLogs')
       );
       const monthlySnapshot = await getDocs(monthlyQuery);
       
-      if (monthlySnapshot.size >= 3000) {
+      // Filter by date in memory to avoid composite index requirement
+      const thisMonthEmails = monthlySnapshot.docs.filter(doc => {
+        const sentAt = doc.data().sentAt;
+        return sentAt >= thisMonthISO;
+      });
+      
+      if (thisMonthEmails.length >= 3000) {
         throw new Error('Limite mensal da plataforma de 3.000 emails atingido. Tente novamente no próximo mês.');
       }
 
