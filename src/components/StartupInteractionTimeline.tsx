@@ -499,13 +499,11 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
 
         setStartupData(interactionData);
 
-        // Fetch CRM messages - Modified query to avoid composite index requirement
-        // Instead of filtering by both startupId and userId, we'll filter by startupId only
-        // and then filter by userId in memory
+        // Fetch CRM messages - Use simple query to avoid composite index requirement
+        // Filter by startupId only, then filter by userId in memory and sort manually
         const messagesQuery = query(
           collection(db, 'crmMessages'),
-          where('startupId', '==', startupId),
-          orderBy('sentAt', 'desc')
+          where('startupId', '==', startupId)
         );
 
         const messagesSnapshot = await getDocs(messagesQuery);
@@ -514,8 +512,10 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
           ...doc.data()
         })) as CRMMessage[];
 
-        // Filter messages by current user in memory
-        const userMessages = allMessages.filter(message => message.userId === auth.currentUser!.uid);
+        // Filter messages by current user in memory and sort by sentAt descending
+        const userMessages = allMessages
+          .filter(message => message.userId === auth.currentUser!.uid)
+          .sort((a, b) => new Date(b.sentAt).getTime() - new Date(a.sentAt).getTime());
 
         setCrmMessages(userMessages);
       } catch (error) {
