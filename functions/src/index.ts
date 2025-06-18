@@ -118,9 +118,18 @@ export const sendEmail = functions.https.onCall(async (data: EmailRequest, conte
       error: mailersendResult.error
     };
 
-  } catch (error) {
+  } catch (error: any) {
     console.error('Erro ao processar mensagem:', error);
-    throw new functions.https.HttpsError('internal', 'Erro interno do servidor');
+    
+    // Provide more specific error information instead of generic message
+    const errorMessage = error.message || 'Erro interno do servidor';
+    const errorCode = error.code || 'internal';
+    
+    throw new functions.https.HttpsError(
+      errorCode === 'internal' ? 'internal' : 'unknown',
+      `Erro ao processar mensagem: ${errorMessage}`,
+      { originalError: error.toString() }
+    );
   }
 });
 
