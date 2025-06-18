@@ -71,7 +71,7 @@ const PIPELINE_STAGES = [
   { id: 'poc', name: 'POC', color: 'bg-orange-200 text-orange-800 border-orange-300' }
 ];
 
-const sendEmailViaMailerSend = async (
+const sendEmailViaEdgeFunction = async (
   recipientEmail: string,
   recipientName: string,
   subject: string,
@@ -79,46 +79,33 @@ const sendEmailViaMailerSend = async (
   htmlContent: string
 ) => {
   try {
-    const response = await fetch("https://api.mailersend.com/v1/email", {
-      method: "POST",
+    const response = await fetch('/api/send-email', {
+      method: 'POST',
       headers: {
-        Authorization: "Bearer mlsn.64216f7d25a14bd7a5a5ef79c45a74e59e8fec49d0de561db2b213b8c3fd900a",
-        "Content-Type": "application/json"
+        'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        from: {
-          email: "contact@genoi.com.br",
-          name: "Agente de inovação aberta - Genie"
-        },
-        to: [
-          {
-            email: recipientEmail,
-            name: recipientName
-          }
-        ],
-        reply_to: {
-          email: "contact@genoi.net",
-          name: "Contato - Gen.OI"
-        },
-        subject: subject,
-        text: textContent,
-        html: htmlContent
+        recipientEmail,
+        recipientName,
+        subject,
+        textContent,
+        htmlContent
       })
     });
 
     if (!response.ok) {
       const errorData = await response.json();
-      throw new Error(`MailerSend API error: ${errorData.message || response.statusText}`);
+      throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
     }
 
     const result = await response.json();
     return {
       success: true,
-      mailersendId: result.id || result.message_id,
-      data: result
+      mailersendId: result.mailersendId,
+      data: result.data
     };
   } catch (error) {
-    console.error('Error sending email via MailerSend:', error);
+    console.error('Error sending email via edge function:', error);
     return {
       success: false,
       error: error instanceof Error ? error.message : 'Unknown error'
@@ -234,7 +221,7 @@ const NewMessageModal = ({
       let messageStatus: 'sent' | 'failed' = 'sent';
       let mailersendId: string | undefined;
 
-      // Send email via MailerSend if it's an email message
+      // Send email via Edge Function if it's an email message
       if (messageType === 'email' && selectedRecipientEmail) {
         if (!emailSubject.trim()) {
           alert('Por favor, preencha o assunto do email.');
@@ -245,7 +232,7 @@ const NewMessageModal = ({
         const htmlContent = generateEmailHTML(newMessage, senderName);
         const textContent = newMessage; // Plain text fallback
 
-        const emailResult = await sendEmailViaMailerSend(
+        const emailResult = await sendEmailViaEdgeFunction(
           selectedRecipientEmail,
           selectedRecipient,
           emailSubject,

@@ -6,3 +6,8 @@
   from = "/plans/success/*"
   to = "/index.html"
   status = 200
+
+[[redirects]]
+  from = "/api/send-email"
+  to = "/.netlify/functions/send-email"
+  status = 200
