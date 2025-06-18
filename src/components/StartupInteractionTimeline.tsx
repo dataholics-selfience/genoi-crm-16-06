@@ -89,7 +89,6 @@ const NewMessageModal = ({
   const [selectedRecipientEmail, setSelectedRecipientEmail] = useState('');
   const [emailSubject, setEmailSubject] = useState('');
   const [isSending, setIsSending] = useState(false);
-  const [senderName, setSenderName] = useState('');
   const [userCompany, setUserCompany] = useState('');
 
   useEffect(() => {
@@ -100,12 +99,10 @@ const NewMessageModal = ({
         const userDoc = await getDoc(doc(db, 'users', auth.currentUser.uid));
         if (userDoc.exists()) {
           const userData = userDoc.data();
-          setSenderName(userData.name || 'Equipe Gen.OI');
           setUserCompany(userData.company || 'Gen.OI');
         }
       } catch (error) {
         console.error('Error fetching user data:', error);
-        setSenderName('Equipe Gen.OI');
         setUserCompany('Gen.OI');
       }
     };
@@ -154,7 +151,7 @@ const NewMessageModal = ({
         // Criar assunto dinâmico
         const dynamicSubject = `A ${userCompany} deseja contatar a ${startupData.startupName} - ${emailSubject}`;
 
-        // Template HTML do email
+        // Template HTML do email exatamente como funcionou antes
         const htmlContent = `
           <!DOCTYPE html>
           <html>
@@ -179,8 +176,7 @@ const NewMessageModal = ({
                       
                       <div style="font-size: 14px; color: #666;">
                           <p><strong>Atenciosamente,</strong><br>
-                          ${senderName}<br>
-                          <em>Agente de Inovação Aberta - Gen.OI</em></p>
+                          Genie, sua agente IA de inovação aberta</p>
                           
                           <p style="margin-top: 20px;">
                               <strong>Gen.OI</strong><br>
@@ -199,7 +195,7 @@ const NewMessageModal = ({
           </html>
         `;
 
-        // Enviar email usando a extensão oficial do MailerSend
+        // Enviar email usando a extensão oficial do MailerSend - formato exato que funcionou
         await addDoc(collection(db, 'emails'), {
           to: [
             {
@@ -218,7 +214,13 @@ const NewMessageModal = ({
             email: 'contact@genoi.net',
             name: 'Gen.OI - Suporte'
           },
-          tags: ['crm', 'startup-interaction']
+          tags: ['crm', 'startup-interaction'],
+          metadata: {
+            startupId: startupData.id,
+            userId: auth.currentUser.uid,
+            recipientType: selectedRecipientType,
+            timestamp: new Date().toISOString()
+          }
         });
       }
 
