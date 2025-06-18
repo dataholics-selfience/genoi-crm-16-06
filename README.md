@@ -1,96 +1,85 @@
 # Gen.OI - Plataforma de Inovação Aberta
 
-## 🔧 Configuração do Ambiente
+## 🔧 Configuração do MailerSend
 
-### 1. Configuração do Firebase
+### 1. Instalar a extensão oficial do MailerSend
 
-#### Instalar Firebase CLI
+#### Via Console Firebase:
+1. Acesse o [Firebase Console](https://console.firebase.google.com/)
+2. Selecione seu projeto `genoi-7777`
+3. Vá em **Extensions** no menu lateral
+4. Clique em **Browse Hub**
+5. Procure por "MailerSend" ou acesse diretamente: [MailerSend Extension](https://extensions.dev/extensions/mailersend/mailersend-email)
+6. Clique em **Install**
+
+#### Via Firebase CLI:
 ```bash
-npm install -g firebase-tools
-firebase login
+firebase ext:install mailersend/mailersend-email --project=genoi-7777
 ```
 
-#### Configurar o projeto
-```bash
-firebase init
-# Selecione: Functions, Firestore, Hosting
-```
+### 2. Configuração durante a instalação
 
-#### Configurar variáveis de ambiente para Firebase Functions
-```bash
-# Configurar API key do MailerSend
-firebase functions:config:set mailersend.api_key="sua_api_key_do_mailersend"
+Durante a instalação, você será solicitado a configurar os seguintes parâmetros:
 
-# Configurar URL do webhook de produção
-firebase functions:config:set webhook.production_url="sua_url_do_webhook"
+- **MAILERSEND_API_KEY**: `mlsn.sua_api_key_aqui`
+- **EMAIL_COLLECTION**: `emails`
+- **DEFAULT_FROM_EMAIL**: `noreply@genoi.net`
+- **DEFAULT_FROM_NAME**: `Gen.OI - Inovação Aberta`
 
-# Verificar configurações
-firebase functions:config:get
-```
+### 3. Configurar domínio no MailerSend
 
-### 2. Deploy das Functions
+1. Acesse o [painel do MailerSend](https://app.mailersend.com/)
+2. Vá em **Domains** > **Add Domain**
+3. Adicione o domínio `genoi.net`
+4. Configure os registros DNS conforme instruído:
+   - **TXT** para verificação
+   - **CNAME** para DKIM
+   - **MX** (se necessário)
 
-```bash
-cd functions
-npm install
-npm run build
-cd ..
-firebase deploy --only functions
-```
+### 4. Obter API Key
 
-### 3. Configuração do Firestore
+1. No painel do MailerSend, vá em **API Tokens**
+2. Clique em **Create Token**
+3. Selecione as permissões: **Email Send**
+4. Copie a API key (formato: `mlsn.xxxxx`)
 
-#### Índices necessários (já configurados em firestore.indexes.json):
-- `crmMessages`: startupId, userId, sentAt
-- `emailLogs`: userId, sentAt
-- `emailLogs`: mailersendId
+## 📧 Como funciona
 
-### 4. Segurança
+### Envio de Email
+1. O usuário preenche o formulário na interface
+2. O sistema adiciona um documento na coleção `emails` do Firestore
+3. A extensão do MailerSend detecta automaticamente o novo documento
+4. O email é enviado via MailerSend
+5. O status é atualizado no documento
 
-#### Credenciais protegidas:
-- ✅ API key do MailerSend: Configurada via Firebase Functions config
-- ✅ URLs de webhook: Configuradas via Firebase Functions config
-- ✅ Configuração do Firebase: Pública (apenas configuração, não credenciais)
-
-#### Firestore Rules:
+### Estrutura do documento de email:
 ```javascript
-rules_version = '2';
-service cloud.firestore {
-  match /databases/{database}/documents {
-    // Permitir acesso apenas a usuários autenticados
-    match /{document=**} {
-      allow read, write: if request.auth != null;
-    }
-    
-    // Logs de email - apenas leitura para o próprio usuário
-    match /emailLogs/{logId} {
-      allow read: if request.auth != null && resource.data.userId == request.auth.uid;
-      allow write: if false; // Apenas Functions podem escrever
-    }
-  }
+{
+  to: [{ email: 'destinatario@exemplo.com', name: 'Nome' }],
+  from: { email: 'noreply@genoi.net', name: 'Gen.OI' },
+  subject: 'Assunto do email',
+  html: 'Conteúdo HTML formatado',
+  text: 'Conteúdo em texto simples',
+  reply_to: { email: 'contact@genoi.net', name: 'Gen.OI - Suporte' },
+  tags: ['crm', 'startup-interaction'],
+  metadata: { startupId: 'xxx', userId: 'xxx' }
 }
 ```
 
-## 📧 Funcionalidades de Email
+## 🎯 Vantagens desta abordagem
 
-### Envio via Firebase Functions
-- **Função**: `sendEmail`
-- **Autenticação**: Requerida
-- **Validação**: Email, assunto e conteúdo obrigatórios
-- **Template**: HTML automático com identidade Gen.OI
-- **Logs**: Registro automático no Firestore
-
-### Webhook do MailerSend
-- **Função**: `mailersendWebhook`
-- **Eventos**: delivered, opened, clicked, bounced
-- **Atualização**: Status automático no Firestore
+✅ **Mais confiável**: Extensão oficial mantida pelo MailerSend  
+✅ **Mais simples**: Sem código de Functions para manter  
+✅ **Mais segura**: API key protegida na configuração da extensão  
+✅ **Monitoramento automático**: Logs e status integrados  
+✅ **Retry automático**: Tentativas automáticas em caso de falha  
+✅ **Webhooks automáticos**: Eventos de entrega configurados automaticamente  
 
 ## 🚀 Deploy
 
 ### Desenvolvimento
 ```bash
 npm run dev
-firebase emulators:start
 ```
 
 ### Produção
@@ -101,12 +90,24 @@ firebase deploy
 
 ## 📊 Monitoramento
 
-### Logs das Functions
-```bash
-firebase functions:log
-```
+### Logs da extensão
+- Acesse **Extensions** > **MailerSend** > **Logs** no Firebase Console
+- Monitore envios, falhas e status de entrega
 
-### Métricas no Console Firebase
-- Execuções das Functions
-- Erros e latência
-- Uso do Firestore
+### Métricas no MailerSend
+- Dashboard com estatísticas de envio
+- Taxa de entrega, abertura e cliques
+- Relatórios detalhados
+
+## 🔧 Troubleshooting
+
+### Email não enviado
+1. Verifique se a extensão está instalada e ativa
+2. Confirme se a API key está correta
+3. Verifique se o domínio está verificado no MailerSend
+4. Consulte os logs da extensão no Firebase Console
+
+### Domínio não verificado
+1. Confirme os registros DNS no seu provedor
+2. Aguarde a propagação (pode levar até 24h)
+3. Use a ferramenta de verificação do MailerSend
