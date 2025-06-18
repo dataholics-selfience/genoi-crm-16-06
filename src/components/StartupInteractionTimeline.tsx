@@ -499,21 +499,25 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
 
         setStartupData(interactionData);
 
-        // Fetch CRM messages
+        // Fetch CRM messages - Modified query to avoid composite index requirement
+        // Instead of filtering by both startupId and userId, we'll filter by startupId only
+        // and then filter by userId in memory
         const messagesQuery = query(
           collection(db, 'crmMessages'),
           where('startupId', '==', startupId),
-          where('userId', '==', auth.currentUser.uid),
           orderBy('sentAt', 'desc')
         );
 
         const messagesSnapshot = await getDocs(messagesQuery);
-        const messagesList = messagesSnapshot.docs.map(doc => ({
+        const allMessages = messagesSnapshot.docs.map(doc => ({
           id: doc.id,
           ...doc.data()
         })) as CRMMessage[];
 
-        setCrmMessages(messagesList);
+        // Filter messages by current user in memory
+        const userMessages = allMessages.filter(message => message.userId === auth.currentUser!.uid);
+
+        setCrmMessages(userMessages);
       } catch (error) {
         console.error('Error fetching startup data:', error);
       } finally {
