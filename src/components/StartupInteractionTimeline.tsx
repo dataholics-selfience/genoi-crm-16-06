@@ -3,8 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { 
   ArrowLeft, Mail, Globe, Linkedin, Phone, User, Building2, 
   Calendar, Edit3, Save, X, Plus, Send, MessageSquare, 
-  ExternalLink, Users, Briefcase, ChevronLeft, ChevronRight,
-  AlertTriangle
+  ExternalLink, Users, Briefcase, ChevronLeft, ChevronRight
 } from 'lucide-react';
 import { 
   doc, 
@@ -64,6 +63,12 @@ interface StartupInteractionTimelineProps {
   onBack: () => void;
 }
 
+interface TokenUsage {
+  totalTokens: number;
+  usedTokens: number;
+  plan: string;
+}
+
 const PIPELINE_STAGES = [
   { id: 'mapeada', name: 'Mapeada', color: 'bg-yellow-200 text-yellow-800 border-yellow-300' },
   { id: 'selecionada', name: 'Selecionada', color: 'bg-blue-200 text-blue-800 border-blue-300' },
@@ -72,60 +77,56 @@ const PIPELINE_STAGES = [
   { id: 'poc', name: 'POC', color: 'bg-orange-200 text-orange-800 border-orange-300' }
 ];
 
-const EMAIL_TOKEN_COST = 10;
-const DAILY_EMAIL_LIMIT = 100;
-const MONTHLY_EMAIL_LIMIT = 3000;
-
 const InsufficientTokensModal = ({ 
   isOpen, 
   onClose, 
-  remainingTokens 
+  requiredTokens,
+  currentTokens 
 }: {
   isOpen: boolean;
   onClose: () => void;
-  remainingTokens: number;
+  requiredTokens: number;
+  currentTokens: number;
 }) => {
-  const navigate = useNavigate();
-
-  const handleUpgrade = () => {
-    navigate('/plans');
-    onClose();
-  };
-
   if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
       <div className="bg-gray-800 rounded-lg p-6 w-full max-w-md mx-4">
-        <div className="flex items-center gap-3 mb-4">
-          <AlertTriangle className="text-yellow-400" size={24} />
+        <div className="flex items-center justify-between mb-4">
           <h3 className="text-lg font-bold text-white">Tokens Insuficientes</h3>
-        </div>
-        
-        <div className="space-y-4 text-gray-300">
-          <p>
-            Você precisa de <span className="font-bold text-white">{EMAIL_TOKEN_COST} tokens</span> para enviar um email, 
-            mas possui apenas <span className="font-bold text-white">{remainingTokens} tokens</span> disponíveis.
-          </p>
-          
-          <p>
-            Para continuar enviando emails, você precisa fazer upgrade do seu plano ou aguardar a renovação dos seus tokens.
-          </p>
-        </div>
-
-        <div className="flex gap-3 mt-6">
-          <button
-            onClick={handleUpgrade}
-            className="flex-1 px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg text-white font-medium transition-colors"
-          >
-            Ver Planos
-          </button>
           <button
             onClick={onClose}
-            className="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-white font-medium transition-colors"
+            className="text-gray-400 hover:text-white"
           >
-            Fechar
+            <X size={20} />
           </button>
+        </div>
+        
+        <div className="space-y-4">
+          <div className="bg-red-900/20 border border-red-700 rounded-lg p-4">
+            <p className="text-red-200 mb-2">
+              Você precisa de <strong>{requiredTokens} tokens</strong> para enviar este email.
+            </p>
+            <p className="text-red-300 text-sm">
+              Saldo atual: <strong>{currentTokens} tokens</strong>
+            </p>
+          </div>
+
+          <div className="flex gap-2">
+            <button
+              onClick={() => window.location.href = '/plans'}
+              className="flex-1 px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg text-white font-medium"
+            >
+              Atualizar Plano
+            </button>
+            <button
+              onClick={onClose}
+              className="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-white font-medium"
+            >
+              Fechar
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -150,43 +151,109 @@ const NewMessageModal = ({
   const [selectedRecipientEmail, setSelectedRecipientEmail] = useState('');
   const [emailSubject, setEmailSubject] = useState('');
   const [isSending, setIsSending] = useState(false);
-  const [userCompany, setUserCompany] = useState('');
-  const [showInsufficientTokensModal, setShowInsufficientTokensModal] = useState(false);
-  const [remainingTokens, setRemainingTokens] = useState(0);
+  const [senderName, setSenderName] = useState('');
+  const [companyName, setCompanyName] = useState('');
+  const [tokenUsage, setTokenUsage] = useState<TokenUsage | null>(null);
+  const [showInsufficientTokens, setShowInsufficientTokens] = useState(false);
+
+  const EMAIL_TOKEN_COST = 10;
+
+  const fetchTokenBalance = async () => {
+    if (!auth.currentUser) return;
+    
+    try {
+      const tokenDoc = await getDoc(doc(db, 'tokenUsage', auth.currentUser.uid));
+      if (tokenDoc.exists()) {
+        setTokenUsage(tokenDoc.data() as TokenUsage);
+      }
+    } catch (error) {
+      console.error('Error fetching token balance:', error);
+    }
+  };
+
+  const checkEmailLimits = async (): Promise<boolean> => {
+    if (!auth.currentUser) return false;
+
+    try {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const todayISO = today.toISOString();
+
+      const thisMonth = new Date();
+      thisMonth.setDate(1);
+      thisMonth.setHours(0, 0, 0, 0);
+      const thisMonthISO = thisMonth.toISOString();
+
+      // Check daily limit (100 emails per day per user)
+      const dailyQuery = query(
+        collection(db, 'emailLogs'),
+        where('userId', '==', auth.currentUser.uid),
+        where('sentAt', '>=', todayISO)
+      );
+      const dailySnapshot = await getDocs(dailyQuery);
+      
+      if (dailySnapshot.size >= 100) {
+        throw new Error('Limite diário de 100 emails atingido. Tente novamente amanhã.');
+      }
+
+      // Check monthly platform limit (3000 emails per month total)
+      const monthlyQuery = query(
+        collection(db, 'emailLogs'),
+        where('sentAt', '>=', thisMonthISO)
+      );
+      const monthlySnapshot = await getDocs(monthlyQuery);
+      
+      if (monthlySnapshot.size >= 3000) {
+        throw new Error('Limite mensal da plataforma de 3.000 emails atingido. Tente novamente no próximo mês.');
+      }
+
+      return true;
+    } catch (error) {
+      console.error('Error checking email limits:', error);
+      throw error;
+    }
+  };
+
+  const checkAndUpdateTokens = async (cost: number): Promise<boolean> => {
+    if (!auth.currentUser || !tokenUsage) return false;
+
+    const remainingTokens = tokenUsage.totalTokens - tokenUsage.usedTokens;
+    if (remainingTokens < cost) {
+      setShowInsufficientTokens(true);
+      return false;
+    }
+
+    await updateDoc(doc(db, 'tokenUsage', auth.currentUser.uid), {
+      usedTokens: tokenUsage.usedTokens + cost
+    });
+
+    setTokenUsage(prev => prev ? {
+      ...prev,
+      usedTokens: prev.usedTokens + cost
+    } : null);
+
+    return true;
+  };
 
   useEffect(() => {
-    const fetchUserCompany = async () => {
+    const fetchUserData = async () => {
       if (!auth.currentUser) return;
       
       try {
         const userDoc = await getDoc(doc(db, 'users', auth.currentUser.uid));
         if (userDoc.exists()) {
-          setUserCompany(userDoc.data().company || 'Empresa');
+          const userData = userDoc.data();
+          setSenderName(userData.name || 'Equipe Gen.OI');
+          setCompanyName(userData.company || '');
         }
       } catch (error) {
-        console.error('Error fetching user company:', error);
-        setUserCompany('Empresa');
-      }
-    };
-
-    const fetchTokenBalance = async () => {
-      if (!auth.currentUser) return;
-      
-      try {
-        const tokenDoc = await getDoc(doc(db, 'tokenUsage', auth.currentUser.uid));
-        if (tokenDoc.exists()) {
-          const tokenUsage = tokenDoc.data();
-          const remaining = tokenUsage.totalTokens - tokenUsage.usedTokens;
-          setRemainingTokens(Math.max(0, remaining));
-        }
-      } catch (error) {
-        console.error('Error fetching token balance:', error);
-        setRemainingTokens(0);
+        console.error('Error fetching sender name:', error);
+        setSenderName('Equipe Gen.OI');
       }
     };
 
     if (isOpen) {
-      fetchUserCompany();
+      fetchUserData();
       fetchTokenBalance();
       // Reset form when modal opens
       setNewMessage('');
@@ -210,78 +277,6 @@ const NewMessageModal = ({
     }
   };
 
-  const checkEmailLimits = async (): Promise<boolean> => {
-    if (!auth.currentUser) return false;
-
-    try {
-      const now = new Date();
-      const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-      const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-
-      // Check daily limit - query by userId only and filter by date in memory
-      const dailyQuery = query(
-        collection(db, 'emailLogs'),
-        where('userId', '==', auth.currentUser.uid)
-      );
-      
-      const dailySnapshot = await getDocs(dailyQuery);
-      const todayEmails = dailySnapshot.docs.filter(doc => {
-        const sentAt = new Date(doc.data().sentAt);
-        return sentAt >= todayStart;
-      });
-
-      if (todayEmails.length >= DAILY_EMAIL_LIMIT) {
-        throw new Error(`Limite diário de ${DAILY_EMAIL_LIMIT} emails atingido. Tente novamente amanhã.`);
-      }
-
-      // Check monthly limit - filter by current month in memory
-      const monthlyEmails = dailySnapshot.docs.filter(doc => {
-        const sentAt = new Date(doc.data().sentAt);
-        return sentAt >= monthStart;
-      });
-
-      if (monthlyEmails.length >= MONTHLY_EMAIL_LIMIT) {
-        throw new Error(`Limite mensal de ${MONTHLY_EMAIL_LIMIT} emails atingido. Aguarde o próximo mês.`);
-      }
-
-      return true;
-    } catch (error) {
-      console.error('Error checking email limits:', error);
-      throw error;
-    }
-  };
-
-  const checkAndUpdateTokens = async (): Promise<boolean> => {
-    if (!auth.currentUser) return false;
-
-    try {
-      const tokenDoc = await getDoc(doc(db, 'tokenUsage', auth.currentUser.uid));
-      if (!tokenDoc.exists()) {
-        setRemainingTokens(0);
-        setShowInsufficientTokensModal(true);
-        return false;
-      }
-
-      const tokenUsage = tokenDoc.data();
-      const remainingTokens = tokenUsage.totalTokens - tokenUsage.usedTokens;
-
-      if (remainingTokens < EMAIL_TOKEN_COST) {
-        setRemainingTokens(Math.max(0, remainingTokens));
-        setShowInsufficientTokensModal(true);
-        return false;
-      }
-
-      await updateDoc(doc(db, 'tokenUsage', auth.currentUser.uid), {
-        usedTokens: tokenUsage.usedTokens + EMAIL_TOKEN_COST
-      });
-
-      return true;
-    } catch (error) {
-      console.error('Error checking tokens:', error);
-      throw error;
-    }
-  };
-
   const handleSendMessage = async () => {
     if (!auth.currentUser || !startupData || !newMessage.trim() || !selectedRecipient) return;
 
@@ -291,26 +286,30 @@ const NewMessageModal = ({
       // Validações específicas para email
       if (messageType === 'email') {
         if (!emailSubject.trim()) {
-          throw new Error('Por favor, preencha o assunto do email.');
+          alert('Por favor, preencha o assunto do email.');
+          setIsSending(false);
+          return;
         }
         if (!selectedRecipientEmail) {
-          throw new Error('Email do destinatário não encontrado.');
+          alert('Email do destinatário não encontrado.');
+          setIsSending(false);
+          return;
         }
 
         // Check email limits
         await checkEmailLimits();
 
-        // Check and update tokens - this will show the modal if insufficient
-        const hasEnoughTokens = await checkAndUpdateTokens();
-        if (!hasEnoughTokens) {
+        // Check and update tokens
+        const hasTokens = await checkAndUpdateTokens(EMAIL_TOKEN_COST);
+        if (!hasTokens) {
           setIsSending(false);
-          return; // Stop execution, modal will be shown
+          return;
         }
 
         // Create final subject with company and startup names
-        const finalSubject = `A ${userCompany} deseja contatar a ${startupData.startupName} - ${emailSubject}`;
+        const finalSubject = `A ${companyName} deseja contatar a ${startupData.startupName} - ${emailSubject}`;
 
-        // Template HTML do email com domínios corretos
+        // Template HTML do email sem restrições de domínio
         const htmlContent = `
           <!DOCTYPE html>
           <html>
@@ -349,12 +348,13 @@ const NewMessageModal = ({
               
               <div style="text-align: center; margin-top: 20px; font-size: 12px; color: #999;">
                   <p>Esta mensagem foi enviada através da plataforma Gen.OI de inovação aberta.</p>
+                  <p>Enviado por Gen.OI</p>
               </div>
           </body>
           </html>
         `;
 
-        // Enviar email usando a extensão oficial do MailerSend
+        // Enviar email usando a extensão oficial do MailerSend - sem restrições de domínio
         const emailDoc = await addDoc(collection(db, 'emails'), {
           to: [
             {
@@ -363,7 +363,7 @@ const NewMessageModal = ({
             }
           ],
           from: {
-            email: 'contact@genoi.com.br',
+            email: 'contact@genoi.net',
             name: 'Gen.OI - Inovação Aberta'
           },
           subject: finalSubject,
@@ -374,21 +374,23 @@ const NewMessageModal = ({
             name: 'Gen.OI - Suporte'
           },
           tags: ['crm', 'startup-interaction'],
+          // Metadados para rastreamento
           metadata: {
             startupId: startupData.id,
             userId: auth.currentUser.uid,
             recipientType: selectedRecipientType,
+            senderName: senderName,
             timestamp: new Date().toISOString()
           }
         });
 
-        // Log email for limits tracking
+        // Log the email for tracking limits
         await addDoc(collection(db, 'emailLogs'), {
           userId: auth.currentUser.uid,
-          sentAt: new Date().toISOString(),
           recipientEmail: selectedRecipientEmail,
-          subject: finalSubject,
-          mailersendId: emailDoc.id
+          sentAt: new Date().toISOString(),
+          emailDocId: emailDoc.id,
+          subject: finalSubject
         });
 
         console.log('Email document created with ID:', emailDoc.id);
@@ -404,7 +406,7 @@ const NewMessageModal = ({
         recipientName: selectedRecipient,
         recipientType: selectedRecipientType,
         recipientEmail: messageType === 'email' ? selectedRecipientEmail : undefined,
-        subject: messageType === 'email' ? emailSubject : undefined,
+        subject: messageType === 'email' ? `A ${companyName} deseja contatar a ${startupData.startupName} - ${emailSubject}` : undefined,
         status: 'sent'
       };
 
@@ -429,12 +431,16 @@ const NewMessageModal = ({
       
       let errorMessage = 'Erro ao enviar mensagem. Tente novamente.';
       
-      if (error.message) {
+      if (error.message.includes('Limite diário')) {
+        errorMessage = error.message;
+      } else if (error.message.includes('Limite mensal')) {
         errorMessage = error.message;
       } else if (error.code === 'permission-denied') {
         errorMessage = 'Permissão negada. Verifique se a extensão MailerSend está instalada e configurada corretamente.';
       } else if (error.code === 'not-found') {
         errorMessage = 'Coleção "emails" não encontrada. Verifique se a extensão MailerSend está instalada.';
+      } else if (error.message) {
+        errorMessage = `Erro: ${error.message}`;
       }
       
       alert(errorMessage);
@@ -445,12 +451,13 @@ const NewMessageModal = ({
 
   if (!isOpen) return null;
 
-  const hasInsufficientTokens = messageType === 'email' && remainingTokens < EMAIL_TOKEN_COST;
+  const remainingTokens = tokenUsage ? tokenUsage.totalTokens - tokenUsage.usedTokens : 0;
+  const hasEnoughTokens = messageType === 'email' ? remainingTokens >= EMAIL_TOKEN_COST : true;
 
   return (
     <>
       <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-        <div className="bg-gray-800 rounded-lg p-6 w-full max-w-2xl mx-4 max-h-[90vh] overflow-y-auto select-none" style={{ userSelect: 'none', WebkitUserSelect: 'none', MozUserSelect: 'none', msUserSelect: 'none' }}>
+        <div className="bg-gray-800 rounded-lg p-6 w-full max-w-2xl mx-4 max-h-[90vh] overflow-y-auto" style={{ userSelect: 'none' }}>
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-lg font-bold text-white">Nova Mensagem</h3>
             <button
@@ -466,7 +473,7 @@ const NewMessageModal = ({
               <select
                 value={messageType}
                 onChange={(e) => setMessageType(e.target.value as 'email' | 'whatsapp')}
-                className="px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:outline-none focus:ring-2 focus:ring-blue-500 select-none"
+                className="px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                 style={{ userSelect: 'none' }}
               >
                 <option value="email">Email</option>
@@ -476,7 +483,7 @@ const NewMessageModal = ({
               <select
                 value={selectedRecipient}
                 onChange={(e) => handleRecipientChange(e.target.value)}
-                className="flex-1 px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:outline-none focus:ring-2 focus:ring-blue-500 select-none"
+                className="flex-1 px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                 style={{ userSelect: 'none' }}
               >
                 <option value="">Selecione o destinatário</option>
@@ -491,22 +498,21 @@ const NewMessageModal = ({
               </select>
             </div>
 
-            {/* Token warning for email */}
-            {messageType === 'email' && (
-              <div className={`p-3 rounded-lg border ${hasInsufficientTokens ? 'bg-red-900/20 border-red-600' : 'bg-blue-900/20 border-blue-600'}`}>
-                <div className="flex items-center gap-2 text-sm">
-                  {hasInsufficientTokens ? (
-                    <AlertTriangle size={16} className="text-red-400" />
-                  ) : (
-                    <Mail size={16} className="text-blue-400" />
-                  )}
-                  <span className={hasInsufficientTokens ? 'text-red-300' : 'text-blue-300'}>
-                    {hasInsufficientTokens 
-                      ? `Tokens insuficientes: ${remainingTokens}/${EMAIL_TOKEN_COST} necessários`
-                      : `Custo: ${EMAIL_TOKEN_COST} tokens (${remainingTokens} disponíveis)`
-                    }
-                  </span>
+            {messageType === 'email' && tokenUsage && (
+              <div className={`text-sm p-3 rounded border ${
+                hasEnoughTokens 
+                  ? 'bg-blue-900/20 border-blue-700 text-blue-200' 
+                  : 'bg-red-900/20 border-red-700 text-red-200'
+              }`}>
+                <div className="flex items-center justify-between">
+                  <span>Custo: {EMAIL_TOKEN_COST} tokens</span>
+                  <span>Saldo: {remainingTokens} tokens</span>
                 </div>
+                {!hasEnoughTokens && (
+                  <div className="mt-1 text-xs">
+                    ⚠️ Tokens insuficientes para enviar email
+                  </div>
+                )}
               </div>
             )}
 
@@ -518,14 +524,9 @@ const NewMessageModal = ({
                   value={emailSubject}
                   onChange={(e) => setEmailSubject(e.target.value)}
                   placeholder="Digite o assunto do email..."
-                  className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:outline-none focus:ring-2 focus:ring-blue-500 select-none"
+                  className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                   style={{ userSelect: 'none' }}
                   required
-                  onCopy={(e) => e.preventDefault()}
-                  onCut={(e) => e.preventDefault()}
-                  onPaste={(e) => e.preventDefault()}
-                  onDragStart={(e) => e.preventDefault()}
-                  onSelectStart={(e) => e.preventDefault()}
                 />
               </div>
             )}
@@ -539,22 +540,16 @@ const NewMessageModal = ({
                 onChange={(e) => setNewMessage(e.target.value)}
                 placeholder={messageType === 'email' ? 'Digite o conteúdo do email...' : 'Digite sua mensagem...'}
                 rows={6}
-                className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 select-none"
+                className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
                 style={{ userSelect: 'none' }}
-                onCopy={(e) => e.preventDefault()}
-                onCut={(e) => e.preventDefault()}
-                onPaste={(e) => e.preventDefault()}
-                onDragStart={(e) => e.preventDefault()}
-                onSelectStart={(e) => e.preventDefault()}
               />
             </div>
 
             <div className="flex gap-2">
               <button
                 onClick={handleSendMessage}
-                disabled={!newMessage.trim() || !selectedRecipient || isSending || (messageType === 'email' && (!emailSubject.trim() || !selectedRecipientEmail || hasInsufficientTokens))}
-                className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg text-white font-medium select-none"
-                style={{ userSelect: 'none' }}
+                disabled={!newMessage.trim() || !selectedRecipient || isSending || (messageType === 'email' && (!emailSubject.trim() || !selectedRecipientEmail || !hasEnoughTokens))}
+                className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg text-white font-medium"
               >
                 {isSending ? (
                   <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
@@ -565,8 +560,7 @@ const NewMessageModal = ({
               </button>
               <button
                 onClick={onClose}
-                className="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-white font-medium select-none"
-                style={{ userSelect: 'none' }}
+                className="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-white font-medium"
               >
                 Cancelar
               </button>
@@ -576,9 +570,10 @@ const NewMessageModal = ({
       </div>
 
       <InsufficientTokensModal
-        isOpen={showInsufficientTokensModal}
-        onClose={() => setShowInsufficientTokensModal(false)}
-        remainingTokens={remainingTokens}
+        isOpen={showInsufficientTokens}
+        onClose={() => setShowInsufficientTokens(false)}
+        requiredTokens={EMAIL_TOKEN_COST}
+        currentTokens={remainingTokens}
       />
     </>
   );
@@ -875,7 +870,7 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
   }
 
   return (
-    <div className="min-h-screen bg-black select-none" style={{ userSelect: 'none', WebkitUserSelect: 'none', MozUserSelect: 'none', msUserSelect: 'none' }}>
+    <div className="min-h-screen bg-black" style={{ userSelect: 'none' }}>
       {/* Header */}
       <div className="flex flex-col p-3 border-b border-gray-700">
         <div className="flex items-center justify-between">
@@ -911,9 +906,9 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
                     type="text"
                     value={startupData.startupName}
                     readOnly
-                    className="w-full px-3 py-2 bg-gray-600 border border-gray-500 rounded text-gray-300 cursor-not-allowed opacity-75 select-none"
-                    style={{ userSelect: 'none' }}
+                    className="w-full px-3 py-2 bg-gray-600 border border-gray-500 rounded text-gray-300 cursor-not-allowed opacity-75"
                     title="Este campo não pode ser editado"
+                    style={{ userSelect: 'none' }}
                   />
                 </div>
 
@@ -925,11 +920,8 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
                       value={startupData.email}
                       onChange={(e) => setStartupData(prev => prev ? { ...prev, email: e.target.value } : null)}
                       onBlur={(e) => handleFieldBlur('email', e.target.value)}
-                      className="flex-1 px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:outline-none focus:ring-2 focus:ring-blue-500 select-none"
+                      className="flex-1 px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                       style={{ userSelect: 'none' }}
-                      onCopy={(e) => e.preventDefault()}
-                      onCut={(e) => e.preventDefault()}
-                      onPaste={(e) => e.preventDefault()}
                     />
                     {startupData.email && (
                       <button
@@ -951,12 +943,9 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
                       value={startupData.whatsapp}
                       onChange={(e) => setStartupData(prev => prev ? { ...prev, whatsapp: e.target.value } : null)}
                       onBlur={(e) => handleFieldBlur('whatsapp', e.target.value)}
-                      className="flex-1 px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:outline-none focus:ring-2 focus:ring-blue-500 select-none"
-                      style={{ userSelect: 'none' }}
+                      className="flex-1 px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                       placeholder="+55 11 99999-9999"
-                      onCopy={(e) => e.preventDefault()}
-                      onCut={(e) => e.preventDefault()}
-                      onPaste={(e) => e.preventDefault()}
+                      style={{ userSelect: 'none' }}
                     />
                     {startupData.whatsapp && (
                       <button
@@ -978,11 +967,8 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
                       value={startupData.website}
                       onChange={(e) => setStartupData(prev => prev ? { ...prev, website: e.target.value } : null)}
                       onBlur={(e) => handleFieldBlur('website', e.target.value)}
-                      className="flex-1 px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:outline-none focus:ring-2 focus:ring-blue-500 select-none"
+                      className="flex-1 px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                       style={{ userSelect: 'none' }}
-                      onCopy={(e) => e.preventDefault()}
-                      onCut={(e) => e.preventDefault()}
-                      onPaste={(e) => e.preventDefault()}
                     />
                     {startupData.website && (
                       <a
@@ -1005,11 +991,8 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
                       value={startupData.linkedin}
                       onChange={(e) => setStartupData(prev => prev ? { ...prev, linkedin: e.target.value } : null)}
                       onBlur={(e) => handleFieldBlur('linkedin', e.target.value)}
-                      className="flex-1 px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:outline-none focus:ring-2 focus:ring-blue-500 select-none"
+                      className="flex-1 px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                       style={{ userSelect: 'none' }}
-                      onCopy={(e) => e.preventDefault()}
-                      onCut={(e) => e.preventDefault()}
-                      onPaste={(e) => e.preventDefault()}
                     />
                     {startupData.linkedin && (
                       <a
@@ -1030,9 +1013,9 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
                     value={startupData.description}
                     readOnly
                     rows={3}
-                    className="w-full px-3 py-2 bg-gray-600 border border-gray-500 rounded text-gray-300 resize-none cursor-not-allowed opacity-75 select-none"
-                    style={{ userSelect: 'none' }}
+                    className="w-full px-3 py-2 bg-gray-600 border border-gray-500 rounded text-gray-300 resize-none cursor-not-allowed opacity-75"
                     title="Este campo não pode ser editado"
+                    style={{ userSelect: 'none' }}
                   />
                 </div>
 
@@ -1092,13 +1075,10 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
                             setStartupData(prev => prev ? { ...prev, founders: updatedFounders } : null);
                           }}
                           onBlur={(e) => handleFounderFieldBlur(founder.id, 'name', e.target.value)}
-                          className="w-full px-2 py-1 bg-gray-700 border border-gray-600 rounded text-white text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 select-none"
-                          style={{ userSelect: 'none' }}
+                          className="w-full px-2 py-1 bg-gray-700 border border-gray-600 rounded text-white text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
                           placeholder="Nome do fundador"
+                          style={{ userSelect: 'none' }}
                           required
-                          onCopy={(e) => e.preventDefault()}
-                          onCut={(e) => e.preventDefault()}
-                          onPaste={(e) => e.preventDefault()}
                         />
                       </div>
 
@@ -1115,12 +1095,9 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
                               setStartupData(prev => prev ? { ...prev, founders: updatedFounders } : null);
                             }}
                             onBlur={(e) => handleFounderFieldBlur(founder.id, 'email', e.target.value)}
-                            className="flex-1 px-2 py-1 bg-gray-700 border border-gray-600 rounded text-white text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 select-none"
-                            style={{ userSelect: 'none' }}
+                            className="flex-1 px-2 py-1 bg-gray-700 border border-gray-600 rounded text-white text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
                             placeholder="email@exemplo.com"
-                            onCopy={(e) => e.preventDefault()}
-                            onCut={(e) => e.preventDefault()}
-                            onPaste={(e) => e.preventDefault()}
+                            style={{ userSelect: 'none' }}
                           />
                           {founder.email && (
                             <button
@@ -1147,12 +1124,9 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
                               setStartupData(prev => prev ? { ...prev, founders: updatedFounders } : null);
                             }}
                             onBlur={(e) => handleFounderFieldBlur(founder.id, 'whatsapp', e.target.value)}
-                            className="flex-1 px-2 py-1 bg-gray-700 border border-gray-600 rounded text-white text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 select-none"
-                            style={{ userSelect: 'none' }}
+                            className="flex-1 px-2 py-1 bg-gray-700 border border-gray-600 rounded text-white text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
                             placeholder="+55 11 99999-9999"
-                            onCopy={(e) => e.preventDefault()}
-                            onCut={(e) => e.preventDefault()}
-                            onPaste={(e) => e.preventDefault()}
+                            style={{ userSelect: 'none' }}
                           />
                           {founder.whatsapp && (
                             <button
@@ -1179,12 +1153,9 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
                               setStartupData(prev => prev ? { ...prev, founders: updatedFounders } : null);
                             }}
                             onBlur={(e) => handleFounderFieldBlur(founder.id, 'linkedin', e.target.value)}
-                            className="flex-1 px-2 py-1 bg-gray-700 border border-gray-600 rounded text-white text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 select-none"
-                            style={{ userSelect: 'none' }}
+                            className="flex-1 px-2 py-1 bg-gray-700 border border-gray-600 rounded text-white text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
                             placeholder="https://linkedin.com/in/..."
-                            onCopy={(e) => e.preventDefault()}
-                            onCut={(e) => e.preventDefault()}
-                            onPaste={(e) => e.preventDefault()}
+                            style={{ userSelect: 'none' }}
                           />
                           {founder.linkedin && (
                             <a
@@ -1213,12 +1184,9 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
                               setStartupData(prev => prev ? { ...prev, founders: updatedFounders } : null);
                             }}
                             onBlur={(e) => handleFounderFieldBlur(founder.id, 'cargo', e.target.value)}
-                            className="flex-1 px-2 py-1 bg-gray-700 border border-gray-600 rounded text-white text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 select-none"
-                            style={{ userSelect: 'none' }}
+                            className="flex-1 px-2 py-1 bg-gray-700 border border-gray-600 rounded text-white text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
                             placeholder="CEO, CTO, Fundador..."
-                            onCopy={(e) => e.preventDefault()}
-                            onCut={(e) => e.preventDefault()}
-                            onPaste={(e) => e.preventDefault()}
+                            style={{ userSelect: 'none' }}
                           />
                         </div>
                       </div>
@@ -1302,7 +1270,7 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
                     </div>
                     {message.subject && (
                       <div className="text-blue-300 font-medium mb-2">
-                        Assunto: {message.subject}
+                        {message.subject}
                       </div>
                     )}
                     <p className="text-gray-300 whitespace-pre-wrap">{message.content}</p>
