@@ -16,7 +16,8 @@ import {
   getDocs,
   addDoc 
 } from 'firebase/firestore';
-import { db, auth } from '../firebase';
+import { httpsCallable } from 'firebase/functions';
+import { db, auth, functions } from '../firebase';
 import { StartupType } from '../types';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -71,47 +72,7 @@ const PIPELINE_STAGES = [
   { id: 'poc', name: 'POC', color: 'bg-orange-200 text-orange-800 border-orange-300' }
 ];
 
-const sendEmailViaEdgeFunction = async (
-  recipientEmail: string,
-  recipientName: string,
-  subject: string,
-  textContent: string,
-  htmlContent: string
-) => {
-  try {
-    const response = await fetch('/api/send-email', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        recipientEmail,
-        recipientName,
-        subject,
-        textContent,
-        htmlContent
-      })
-    });
-
-    if (!response.ok) {
-      const errorData = await response.json();
-      throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
-    }
-
-    const result = await response.json();
-    return {
-      success: true,
-      mailersendId: result.mailersendId,
-      data: result.data
-    };
-  } catch (error) {
-    console.error('Error sending email via edge function:', error);
-    return {
-      success: false,
-      error: error instanceof Error ? error.message : 'Unknown error'
-    };
-  }
-};
+const sendEmailFunction = httpsCallable(functions, 'sendEmail');
 
 const generateEmailHTML = (content: string, senderName: string) => {
   return `
@@ -221,7 +182,7 @@ const NewMessageModal = ({
       let messageStatus: 'sent' | 'failed' = 'sent';
       let mailersendId: string | undefined;
 
-      // Send email via Edge Function if it's an email message
+      // Send email via Firebase Function if it's an email message
       if (messageType === 'email' && selectedRecipientEmail) {
         if (!emailSubject.trim()) {
           alert('Por favor, preencha o assunto do email.');
@@ -232,20 +193,27 @@ const NewMessageModal = ({
         const htmlContent = generateEmailHTML(newMessage, senderName);
         const textContent = newMessage; // Plain text fallback
 
-        const emailResult = await sendEmailViaEdgeFunction(
-          selectedRecipientEmail,
-          selectedRecipient,
-          emailSubject,
-          textContent,
-          htmlContent
-        );
+        try {
+          const result = await sendEmailFunction({
+            recipientEmail: selectedRecipientEmail,
+            recipientName: selectedRecipient,
+            subject: emailSubject,
+            textContent: textContent,
+            htmlContent: htmlContent,
+            senderName: senderName
+          });
 
-        if (!emailResult.success) {
-          alert(`Erro ao enviar email: ${emailResult.error}`);
+          const data = result.data as any;
+          if (data.success) {
+            mailersendId = data.mailersendId;
+            alert('Email enviado com sucesso!');
+          } else {
+            throw new Error(data.message || 'Erro desconhecido');
+          }
+        } catch (error: any) {
+          console.error('Error sending email:', error);
+          alert(`Erro ao enviar email: ${error.message || 'Erro desconhecido'}`);
           messageStatus = 'failed';
-        } else {
-          mailersendId = emailResult.mailersendId;
-          alert('Email enviado com sucesso!');
         }
       } else if (messageType === 'whatsapp') {
         // For WhatsApp, we just record the message (no actual sending implemented)
@@ -322,7 +290,7 @@ const NewMessageModal = ({
               {startupData.email && (
                 <option value={startupData.startupName}>{startupData.startupName} (Geral)</option>
               )}
-              {startupData.founders?.filter(founder => founder.name.trim()).map((founder) => (
+              {startupData.founders?.filter(founder => founder.name.trim() && founder.email.trim()).map((founder) => (
                 <option key={founder.id} value={founder.name}>
                   {founder.name} {founder.cargo && `(${founder.cargo})`}
                 </option>
@@ -378,7 +346,7 @@ const NewMessageModal = ({
           <div className="flex gap-2">
             <button
               onClick={handleSendMessage}
-              disabled={!newMessage.trim() || !selectedRecipient || isSending || (messageType === 'email' && !emailSubject.trim())}
+              disabled={!newMessage.trim() || !selectedRecipient || isSending || (messageType === 'email' && (!emailSubject.trim() || !selectedRecipientEmail))}
               className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg text-white font-medium"
             >
               {isSending ? (
@@ -501,7 +469,8 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
         const messagesQuery = query(
           collection(db, 'crmMessages'),
           where('startupId', '==', startupId),
-          where('userId', '==', auth.currentUser.uid)
+          where('userId', '==', auth.currentUser.uid),
+          orderBy('sentAt', 'desc')
         );
 
         const messagesSnapshot = await getDocs(messagesQuery);
@@ -510,12 +479,7 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
           ...doc.data()
         })) as CRMMessage[];
 
-        // Sort messages by sentAt in JavaScript instead of Firestore
-        const sortedMessages = messagesList.sort((a, b) => 
-          new Date(b.sentAt).getTime() - new Date(a.sentAt).getTime()
-        );
-
-        setCrmMessages(sortedMessages);
+        setCrmMessages(messagesList);
       } catch (error) {
         console.error('Error fetching startup data:', error);
       } finally {
