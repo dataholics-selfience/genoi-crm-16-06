@@ -121,14 +121,70 @@ export const sendEmail = functions.https.onCall(async (data: EmailRequest, conte
   } catch (error: any) {
     console.error('Erro ao processar mensagem:', error);
     
-    // Provide more specific error information instead of generic message
+    // Check if the error is already an HttpsError and re-throw it directly
+    if (error instanceof functions.https.HttpsError) {
+      throw error;
+    }
+    
+    // Map Firebase error codes to valid FunctionsErrorCode
+    let errorCode: functions.https.FunctionsErrorCode = 'internal';
+    
+    if (error.code) {
+      switch (error.code) {
+        case 'permission-denied':
+          errorCode = 'permission-denied';
+          break;
+        case 'not-found':
+          errorCode = 'not-found';
+          break;
+        case 'already-exists':
+          errorCode = 'already-exists';
+          break;
+        case 'resource-exhausted':
+          errorCode = 'resource-exhausted';
+          break;
+        case 'failed-precondition':
+          errorCode = 'failed-precondition';
+          break;
+        case 'aborted':
+          errorCode = 'aborted';
+          break;
+        case 'out-of-range':
+          errorCode = 'out-of-range';
+          break;
+        case 'unimplemented':
+          errorCode = 'unimplemented';
+          break;
+        case 'unavailable':
+          errorCode = 'unavailable';
+          break;
+        case 'deadline-exceeded':
+          errorCode = 'deadline-exceeded';
+          break;
+        case 'cancelled':
+          errorCode = 'cancelled';
+          break;
+        case 'invalid-argument':
+          errorCode = 'invalid-argument';
+          break;
+        case 'unauthenticated':
+          errorCode = 'unauthenticated';
+          break;
+        default:
+          errorCode = 'internal';
+      }
+    }
+    
+    // Provide more specific error information
     const errorMessage = error.message || 'Erro interno do servidor';
-    const errorCode = error.code || 'unknown';
     
     throw new functions.https.HttpsError(
-      errorCode === 'unknown' ? 'unknown' : 'internal',
+      errorCode,
       `Erro ao processar mensagem: ${errorMessage}`,
-      { originalError: error.toString() }
+      { 
+        originalError: error.toString(),
+        originalCode: error.code || 'unknown'
+      }
     );
   }
 });
