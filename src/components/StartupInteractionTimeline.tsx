@@ -14,8 +14,7 @@ import {
   where, 
   orderBy, 
   getDocs,
-  addDoc,
-  increment 
+  addDoc 
 } from 'firebase/firestore';
 import { db, auth } from '../firebase';
 import { StartupType } from '../types';
@@ -94,29 +93,25 @@ const NewMessageModal = ({
   const [selectedRecipientEmail, setSelectedRecipientEmail] = useState('');
   const [emailSubject, setEmailSubject] = useState('');
   const [isSending, setIsSending] = useState(false);
-  const [senderName, setSenderName] = useState('');
   const [userCompany, setUserCompany] = useState('');
 
   useEffect(() => {
-    const fetchSenderData = async () => {
+    const fetchUserCompany = async () => {
       if (!auth.currentUser) return;
       
       try {
         const userDoc = await getDoc(doc(db, 'users', auth.currentUser.uid));
         if (userDoc.exists()) {
-          const userData = userDoc.data();
-          setSenderName(userData.name || 'Equipe Gen.OI');
-          setUserCompany(userData.company || 'Empresa');
+          setUserCompany(userDoc.data().company || 'Empresa');
         }
       } catch (error) {
-        console.error('Error fetching sender data:', error);
-        setSenderName('Equipe Gen.OI');
+        console.error('Error fetching user company:', error);
         setUserCompany('Empresa');
       }
     };
 
     if (isOpen) {
-      fetchSenderData();
+      fetchUserCompany();
       // Reset form when modal opens
       setNewMessage('');
       setEmailSubject('');
@@ -125,92 +120,6 @@ const NewMessageModal = ({
       setMessageType('email');
     }
   }, [isOpen]);
-
-  const checkEmailLimits = async () => {
-    if (!auth.currentUser) return { canSend: false, reason: 'Usuário não autenticado' };
-
-    try {
-      // Check user tokens
-      const tokenDoc = await getDoc(doc(db, 'tokenUsage', auth.currentUser.uid));
-      if (!tokenDoc.exists()) {
-        return { canSend: false, reason: 'Dados de token não encontrados' };
-      }
-
-      const tokenData = tokenDoc.data();
-      const remainingTokens = tokenData.totalTokens - tokenData.usedTokens;
-      
-      if (remainingTokens < EMAIL_TOKEN_COST) {
-        return { 
-          canSend: false, 
-          reason: `Tokens insuficientes. Você precisa de ${EMAIL_TOKEN_COST} tokens para enviar um email, mas possui apenas ${remainingTokens} tokens restantes.` 
-        };
-      }
-
-      // Check daily limit for user - Use simpler query without composite index
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      const tomorrow = new Date(today);
-      tomorrow.setDate(tomorrow.getDate() + 1);
-
-      // Query only by userId first, then filter by date in memory to avoid composite index
-      const dailyQuery = query(
-        collection(db, 'emailLogs'),
-        where('userId', '==', auth.currentUser.uid)
-      );
-
-      const dailySnapshot = await getDocs(dailyQuery);
-      const todayISOString = today.toISOString();
-      const tomorrowISOString = tomorrow.toISOString();
-      
-      // Filter by date in memory
-      const dailyCount = dailySnapshot.docs.filter(doc => {
-        const sentAt = doc.data().sentAt;
-        return sentAt >= todayISOString && sentAt < tomorrowISOString;
-      }).length;
-
-      if (dailyCount >= DAILY_EMAIL_LIMIT) {
-        return { 
-          canSend: false, 
-          reason: `Limite diário atingido. Você já enviou ${dailyCount} emails hoje. Limite: ${DAILY_EMAIL_LIMIT} emails por dia.` 
-        };
-      }
-
-      // Check monthly platform limit - Use simpler approach
-      const firstDayOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
-      const firstDayOfNextMonth = new Date(today.getFullYear(), today.getMonth() + 1, 1);
-
-      // Get all email logs and filter by month in memory to avoid composite index issues
-      const allEmailsQuery = query(collection(db, 'emailLogs'));
-      const allEmailsSnapshot = await getDocs(allEmailsQuery);
-      
-      const firstDayOfMonthISOString = firstDayOfMonth.toISOString();
-      const firstDayOfNextMonthISOString = firstDayOfNextMonth.toISOString();
-      
-      // Filter by month in memory
-      const monthlyCount = allEmailsSnapshot.docs.filter(doc => {
-        const sentAt = doc.data().sentAt;
-        return sentAt >= firstDayOfMonthISOString && sentAt < firstDayOfNextMonthISOString;
-      }).length;
-
-      if (monthlyCount >= MONTHLY_EMAIL_LIMIT) {
-        return { 
-          canSend: false, 
-          reason: `Limite mensal da plataforma atingido. A plataforma já enviou ${monthlyCount} emails este mês. Limite: ${MONTHLY_EMAIL_LIMIT} emails por mês.` 
-        };
-      }
-
-      return { 
-        canSend: true, 
-        dailyCount, 
-        monthlyCount, 
-        remainingTokens 
-      };
-
-    } catch (error) {
-      console.error('Error checking email limits:', error);
-      return { canSend: false, reason: 'Erro ao verificar limites de email' };
-    }
-  };
 
   const handleRecipientChange = (value: string) => {
     setSelectedRecipient(value);
@@ -225,6 +134,72 @@ const NewMessageModal = ({
     }
   };
 
+  const checkEmailLimits = async (): Promise<boolean> => {
+    if (!auth.currentUser) return false;
+
+    try {
+      const now = new Date();
+      const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+
+      // Check daily limit - query by userId only and filter by date in memory
+      const dailyQuery = query(
+        collection(db, 'emailLogs'),
+        where('userId', '==', auth.currentUser.uid)
+      );
+      
+      const dailySnapshot = await getDocs(dailyQuery);
+      const todayEmails = dailySnapshot.docs.filter(doc => {
+        const sentAt = new Date(doc.data().sentAt);
+        return sentAt >= todayStart;
+      });
+
+      if (todayEmails.length >= DAILY_EMAIL_LIMIT) {
+        throw new Error(`Limite diário de ${DAILY_EMAIL_LIMIT} emails atingido. Tente novamente amanhã.`);
+      }
+
+      // Check monthly limit - filter by current month in memory
+      const monthlyEmails = dailySnapshot.docs.filter(doc => {
+        const sentAt = new Date(doc.data().sentAt);
+        return sentAt >= monthStart;
+      });
+
+      if (monthlyEmails.length >= MONTHLY_EMAIL_LIMIT) {
+        throw new Error(`Limite mensal de ${MONTHLY_EMAIL_LIMIT} emails atingido. Aguarde o próximo mês.`);
+      }
+
+      return true;
+    } catch (error) {
+      console.error('Error checking email limits:', error);
+      throw error;
+    }
+  };
+
+  const checkAndUpdateTokens = async (): Promise<boolean> => {
+    if (!auth.currentUser) return false;
+
+    try {
+      const tokenDoc = await getDoc(doc(db, 'tokenUsage', auth.currentUser.uid));
+      if (!tokenDoc.exists()) return false;
+
+      const tokenUsage = tokenDoc.data();
+      const remainingTokens = tokenUsage.totalTokens - tokenUsage.usedTokens;
+
+      if (remainingTokens < EMAIL_TOKEN_COST) {
+        throw new Error(`Tokens insuficientes. Você precisa de ${EMAIL_TOKEN_COST} tokens para enviar um email.`);
+      }
+
+      await updateDoc(doc(db, 'tokenUsage', auth.currentUser.uid), {
+        usedTokens: tokenUsage.usedTokens + EMAIL_TOKEN_COST
+      });
+
+      return true;
+    } catch (error) {
+      console.error('Error checking tokens:', error);
+      throw error;
+    }
+  };
+
   const handleSendMessage = async () => {
     if (!auth.currentUser || !startupData || !newMessage.trim() || !selectedRecipient) return;
 
@@ -234,26 +209,20 @@ const NewMessageModal = ({
       // Validações específicas para email
       if (messageType === 'email') {
         if (!emailSubject.trim()) {
-          alert('Por favor, preencha o assunto do email.');
-          setIsSending(false);
-          return;
+          throw new Error('Por favor, preencha o assunto do email.');
         }
         if (!selectedRecipientEmail) {
-          alert('Email do destinatário não encontrado.');
-          setIsSending(false);
-          return;
+          throw new Error('Email do destinatário não encontrado.');
         }
 
         // Check email limits
-        const limitCheck = await checkEmailLimits();
-        if (!limitCheck.canSend) {
-          alert(limitCheck.reason);
-          setIsSending(false);
-          return;
-        }
+        await checkEmailLimits();
 
-        // Create subject with company and startup names
-        const fullSubject = `A ${userCompany} deseja contatar a ${startupData.startupName} - ${emailSubject}`;
+        // Check and update tokens
+        await checkAndUpdateTokens();
+
+        // Create final subject with company and startup names
+        const finalSubject = `A ${userCompany} deseja contatar a ${startupData.startupName} - ${emailSubject}`;
 
         // Template HTML do email com domínios corretos
         const htmlContent = `
@@ -299,7 +268,7 @@ const NewMessageModal = ({
           </html>
         `;
 
-        // Enviar email usando a extensão oficial do MailerSend com domínios corretos
+        // Enviar email usando a extensão oficial do MailerSend
         const emailDoc = await addDoc(collection(db, 'emails'), {
           to: [
             {
@@ -308,43 +277,32 @@ const NewMessageModal = ({
             }
           ],
           from: {
-            email: 'contact@genoi.com.br',  // Usando o domínio validado
+            email: 'contact@genoi.com.br',
             name: 'Gen.OI - Inovação Aberta'
           },
-          subject: fullSubject,
+          subject: finalSubject,
           html: htmlContent,
           text: newMessage.trim(),
           reply_to: {
-            email: 'contact@genoi.net',  // Responder para genoi.net conforme solicitado
+            email: 'contact@genoi.net',
             name: 'Gen.OI - Suporte'
           },
           tags: ['crm', 'startup-interaction'],
-          // Metadados para rastreamento
           metadata: {
             startupId: startupData.id,
             userId: auth.currentUser.uid,
             recipientType: selectedRecipientType,
-            senderName: senderName,
             timestamp: new Date().toISOString()
           }
         });
 
-        // Log the email
+        // Log email for limits tracking
         await addDoc(collection(db, 'emailLogs'), {
           userId: auth.currentUser.uid,
-          userEmail: auth.currentUser.email,
-          recipientEmail: selectedRecipientEmail,
-          recipientName: selectedRecipient,
-          subject: fullSubject,
-          startupId: startupData.id,
-          startupName: startupData.startupName,
           sentAt: new Date().toISOString(),
+          recipientEmail: selectedRecipientEmail,
+          subject: finalSubject,
           mailersendId: emailDoc.id
-        });
-
-        // Deduct tokens
-        await updateDoc(doc(db, 'tokenUsage', auth.currentUser.uid), {
-          usedTokens: increment(EMAIL_TOKEN_COST)
         });
 
         console.log('Email document created with ID:', emailDoc.id);
@@ -360,7 +318,7 @@ const NewMessageModal = ({
         recipientName: selectedRecipient,
         recipientType: selectedRecipientType,
         recipientEmail: messageType === 'email' ? selectedRecipientEmail : undefined,
-        subject: messageType === 'email' ? `A ${userCompany} deseja contatar a ${startupData.startupName} - ${emailSubject}` : undefined,
+        subject: messageType === 'email' ? emailSubject : undefined,
         status: 'sent'
       };
 
@@ -373,31 +331,24 @@ const NewMessageModal = ({
 
       onMessageSent(newCrmMessage);
       
-      // Reset form
+      // Reset form and close modal
       setNewMessage('');
       setEmailSubject('');
       setSelectedRecipient('');
       setSelectedRecipientEmail('');
       onClose();
 
-      // Show success message
-      if (messageType === 'email') {
-        alert(`Email enviado com sucesso!\n\nDe: contact@genoi.com.br\nPara: ${selectedRecipientEmail}\nAssunto: A ${userCompany} deseja contatar a ${startupData.startupName} - ${emailSubject}\n\nO email será processado pela extensão MailerSend.\n\n${EMAIL_TOKEN_COST} tokens foram descontados da sua conta.`);
-      } else {
-        alert('Mensagem WhatsApp registrada. Envie manualmente através do WhatsApp.');
-      }
-
     } catch (error: any) {
       console.error('Error sending message:', error);
       
       let errorMessage = 'Erro ao enviar mensagem. Tente novamente.';
       
-      if (error.code === 'permission-denied') {
+      if (error.message) {
+        errorMessage = error.message;
+      } else if (error.code === 'permission-denied') {
         errorMessage = 'Permissão negada. Verifique se a extensão MailerSend está instalada e configurada corretamente.';
       } else if (error.code === 'not-found') {
         errorMessage = 'Coleção "emails" não encontrada. Verifique se a extensão MailerSend está instalada.';
-      } else if (error.message) {
-        errorMessage = `Erro: ${error.message}`;
       }
       
       alert(errorMessage);
@@ -410,7 +361,7 @@ const NewMessageModal = ({
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-gray-800 rounded-lg p-6 w-full max-w-2xl mx-4 max-h-[90vh] overflow-y-auto">
+      <div className="bg-gray-800 rounded-lg p-6 w-full max-w-2xl mx-4 max-h-[90vh] overflow-y-auto select-none" style={{ userSelect: 'none', WebkitUserSelect: 'none', MozUserSelect: 'none', msUserSelect: 'none' }}>
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-lg font-bold text-white">Nova Mensagem</h3>
           <button
@@ -426,7 +377,8 @@ const NewMessageModal = ({
             <select
               value={messageType}
               onChange={(e) => setMessageType(e.target.value as 'email' | 'whatsapp')}
-              className="px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:outline-none focus:ring-2 focus:ring-blue-500 select-none"
+              style={{ userSelect: 'none' }}
             >
               <option value="email">Email</option>
               <option value="whatsapp">WhatsApp</option>
@@ -435,7 +387,8 @@ const NewMessageModal = ({
             <select
               value={selectedRecipient}
               onChange={(e) => handleRecipientChange(e.target.value)}
-              className="flex-1 px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="flex-1 px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:outline-none focus:ring-2 focus:ring-blue-500 select-none"
+              style={{ userSelect: 'none' }}
             >
               <option value="">Selecione o destinatário</option>
               {startupData.email && (
@@ -457,18 +410,15 @@ const NewMessageModal = ({
                 value={emailSubject}
                 onChange={(e) => setEmailSubject(e.target.value)}
                 placeholder="Digite o assunto do email..."
-                className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:outline-none focus:ring-2 focus:ring-blue-500 select-none"
+                style={{ userSelect: 'none' }}
                 required
+                onCopy={(e) => e.preventDefault()}
+                onCut={(e) => e.preventDefault()}
+                onPaste={(e) => e.preventDefault()}
+                onDragStart={(e) => e.preventDefault()}
+                onSelectStart={(e) => e.preventDefault()}
               />
-              <div className="text-xs text-gray-400 mt-1">
-                Assunto final: "A {userCompany} deseja contatar a {startupData.startupName} - {emailSubject || '[seu assunto]'}"
-              </div>
-            </div>
-          )}
-
-          {selectedRecipientEmail && messageType === 'email' && (
-            <div className="text-sm text-gray-400 bg-gray-700 p-2 rounded">
-              📧 Será enviado para: <strong>{selectedRecipientEmail}</strong>
             </div>
           )}
 
@@ -481,42 +431,34 @@ const NewMessageModal = ({
               onChange={(e) => setNewMessage(e.target.value)}
               placeholder={messageType === 'email' ? 'Digite o conteúdo do email...' : 'Digite sua mensagem...'}
               rows={6}
-              className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 select-none"
+              style={{ userSelect: 'none' }}
+              onCopy={(e) => e.preventDefault()}
+              onCut={(e) => e.preventDefault()}
+              onPaste={(e) => e.preventDefault()}
+              onDragStart={(e) => e.preventDefault()}
+              onSelectStart={(e) => e.preventDefault()}
             />
           </div>
-
-          {messageType === 'email' && (
-            <div className="text-xs text-gray-400 bg-gray-700 p-3 rounded">
-              <strong>ℹ️ Configuração do Email:</strong>
-              <ul className="mt-1 space-y-1">
-                <li>• <strong>Remetente:</strong> contact@genoi.com.br (Genie, sua agente IA)</li>
-                <li>• <strong>Responder para:</strong> contact@genoi.net</li>
-                <li>• <strong>Processamento:</strong> Enviado por Gen.OI</li>
-                <li>• <strong>Domínio validado:</strong> genoi.com.br ✅</li>
-                <li>• <strong>Custo:</strong> {EMAIL_TOKEN_COST} tokens por email</li>
-                <li>• <strong>Limite diário:</strong> {DAILY_EMAIL_LIMIT} emails por usuário</li>
-                <li>• <strong>Limite mensal:</strong> {MONTHLY_EMAIL_LIMIT} emails na plataforma</li>
-                <li>• O email será formatado automaticamente com a identidade visual da Gen.OI</li>
-              </ul>
-            </div>
-          )}
 
           <div className="flex gap-2">
             <button
               onClick={handleSendMessage}
               disabled={!newMessage.trim() || !selectedRecipient || isSending || (messageType === 'email' && (!emailSubject.trim() || !selectedRecipientEmail))}
-              className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg text-white font-medium"
+              className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg text-white font-medium select-none"
+              style={{ userSelect: 'none' }}
             >
               {isSending ? (
                 <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
               ) : (
                 <Send size={16} />
               )}
-              {isSending ? 'Enviando...' : messageType === 'email' ? `Enviar Email (-${EMAIL_TOKEN_COST} tokens)` : 'Registrar WhatsApp'}
+              {isSending ? 'Enviando...' : messageType === 'email' ? 'Enviar Email' : 'Registrar WhatsApp'}
             </button>
             <button
               onClick={onClose}
-              className="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-white font-medium"
+              className="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-white font-medium select-none"
+              style={{ userSelect: 'none' }}
             >
               Cancelar
             </button>
@@ -818,7 +760,7 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
   }
 
   return (
-    <div className="min-h-screen bg-black">
+    <div className="min-h-screen bg-black select-none" style={{ userSelect: 'none', WebkitUserSelect: 'none', MozUserSelect: 'none', msUserSelect: 'none' }}>
       {/* Header */}
       <div className="flex flex-col p-3 border-b border-gray-700">
         <div className="flex items-center justify-between">
@@ -854,7 +796,8 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
                     type="text"
                     value={startupData.startupName}
                     readOnly
-                    className="w-full px-3 py-2 bg-gray-600 border border-gray-500 rounded text-gray-300 cursor-not-allowed opacity-75"
+                    className="w-full px-3 py-2 bg-gray-600 border border-gray-500 rounded text-gray-300 cursor-not-allowed opacity-75 select-none"
+                    style={{ userSelect: 'none' }}
                     title="Este campo não pode ser editado"
                   />
                 </div>
@@ -867,7 +810,11 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
                       value={startupData.email}
                       onChange={(e) => setStartupData(prev => prev ? { ...prev, email: e.target.value } : null)}
                       onBlur={(e) => handleFieldBlur('email', e.target.value)}
-                      className="flex-1 px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      className="flex-1 px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:outline-none focus:ring-2 focus:ring-blue-500 select-none"
+                      style={{ userSelect: 'none' }}
+                      onCopy={(e) => e.preventDefault()}
+                      onCut={(e) => e.preventDefault()}
+                      onPaste={(e) => e.preventDefault()}
                     />
                     {startupData.email && (
                       <button
@@ -889,8 +836,12 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
                       value={startupData.whatsapp}
                       onChange={(e) => setStartupData(prev => prev ? { ...prev, whatsapp: e.target.value } : null)}
                       onBlur={(e) => handleFieldBlur('whatsapp', e.target.value)}
-                      className="flex-1 px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      className="flex-1 px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:outline-none focus:ring-2 focus:ring-blue-500 select-none"
+                      style={{ userSelect: 'none' }}
                       placeholder="+55 11 99999-9999"
+                      onCopy={(e) => e.preventDefault()}
+                      onCut={(e) => e.preventDefault()}
+                      onPaste={(e) => e.preventDefault()}
                     />
                     {startupData.whatsapp && (
                       <button
@@ -912,7 +863,11 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
                       value={startupData.website}
                       onChange={(e) => setStartupData(prev => prev ? { ...prev, website: e.target.value } : null)}
                       onBlur={(e) => handleFieldBlur('website', e.target.value)}
-                      className="flex-1 px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      className="flex-1 px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:outline-none focus:ring-2 focus:ring-blue-500 select-none"
+                      style={{ userSelect: 'none' }}
+                      onCopy={(e) => e.preventDefault()}
+                      onCut={(e) => e.preventDefault()}
+                      onPaste={(e) => e.preventDefault()}
                     />
                     {startupData.website && (
                       <a
@@ -935,7 +890,11 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
                       value={startupData.linkedin}
                       onChange={(e) => setStartupData(prev => prev ? { ...prev, linkedin: e.target.value } : null)}
                       onBlur={(e) => handleFieldBlur('linkedin', e.target.value)}
-                      className="flex-1 px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      className="flex-1 px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:outline-none focus:ring-2 focus:ring-blue-500 select-none"
+                      style={{ userSelect: 'none' }}
+                      onCopy={(e) => e.preventDefault()}
+                      onCut={(e) => e.preventDefault()}
+                      onPaste={(e) => e.preventDefault()}
                     />
                     {startupData.linkedin && (
                       <a
@@ -956,7 +915,8 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
                     value={startupData.description}
                     readOnly
                     rows={3}
-                    className="w-full px-3 py-2 bg-gray-600 border border-gray-500 rounded text-gray-300 resize-none cursor-not-allowed opacity-75"
+                    className="w-full px-3 py-2 bg-gray-600 border border-gray-500 rounded text-gray-300 resize-none cursor-not-allowed opacity-75 select-none"
+                    style={{ userSelect: 'none' }}
                     title="Este campo não pode ser editado"
                   />
                 </div>
@@ -1017,9 +977,13 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
                             setStartupData(prev => prev ? { ...prev, founders: updatedFounders } : null);
                           }}
                           onBlur={(e) => handleFounderFieldBlur(founder.id, 'name', e.target.value)}
-                          className="w-full px-2 py-1 bg-gray-700 border border-gray-600 rounded text-white text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
+                          className="w-full px-2 py-1 bg-gray-700 border border-gray-600 rounded text-white text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 select-none"
+                          style={{ userSelect: 'none' }}
                           placeholder="Nome do fundador"
                           required
+                          onCopy={(e) => e.preventDefault()}
+                          onCut={(e) => e.preventDefault()}
+                          onPaste={(e) => e.preventDefault()}
                         />
                       </div>
 
@@ -1036,8 +1000,12 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
                               setStartupData(prev => prev ? { ...prev, founders: updatedFounders } : null);
                             }}
                             onBlur={(e) => handleFounderFieldBlur(founder.id, 'email', e.target.value)}
-                            className="flex-1 px-2 py-1 bg-gray-700 border border-gray-600 rounded text-white text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
+                            className="flex-1 px-2 py-1 bg-gray-700 border border-gray-600 rounded text-white text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 select-none"
+                            style={{ userSelect: 'none' }}
                             placeholder="email@exemplo.com"
+                            onCopy={(e) => e.preventDefault()}
+                            onCut={(e) => e.preventDefault()}
+                            onPaste={(e) => e.preventDefault()}
                           />
                           {founder.email && (
                             <button
@@ -1064,8 +1032,12 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
                               setStartupData(prev => prev ? { ...prev, founders: updatedFounders } : null);
                             }}
                             onBlur={(e) => handleFounderFieldBlur(founder.id, 'whatsapp', e.target.value)}
-                            className="flex-1 px-2 py-1 bg-gray-700 border border-gray-600 rounded text-white text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
+                            className="flex-1 px-2 py-1 bg-gray-700 border border-gray-600 rounded text-white text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 select-none"
+                            style={{ userSelect: 'none' }}
                             placeholder="+55 11 99999-9999"
+                            onCopy={(e) => e.preventDefault()}
+                            onCut={(e) => e.preventDefault()}
+                            onPaste={(e) => e.preventDefault()}
                           />
                           {founder.whatsapp && (
                             <button
@@ -1092,8 +1064,12 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
                               setStartupData(prev => prev ? { ...prev, founders: updatedFounders } : null);
                             }}
                             onBlur={(e) => handleFounderFieldBlur(founder.id, 'linkedin', e.target.value)}
-                            className="flex-1 px-2 py-1 bg-gray-700 border border-gray-600 rounded text-white text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
+                            className="flex-1 px-2 py-1 bg-gray-700 border border-gray-600 rounded text-white text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 select-none"
+                            style={{ userSelect: 'none' }}
                             placeholder="https://linkedin.com/in/..."
+                            onCopy={(e) => e.preventDefault()}
+                            onCut={(e) => e.preventDefault()}
+                            onPaste={(e) => e.preventDefault()}
                           />
                           {founder.linkedin && (
                             <a
@@ -1122,8 +1098,12 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
                               setStartupData(prev => prev ? { ...prev, founders: updatedFounders } : null);
                             }}
                             onBlur={(e) => handleFounderFieldBlur(founder.id, 'cargo', e.target.value)}
-                            className="flex-1 px-2 py-1 bg-gray-700 border border-gray-600 rounded text-white text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
+                            className="flex-1 px-2 py-1 bg-gray-700 border border-gray-600 rounded text-white text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 select-none"
+                            style={{ userSelect: 'none' }}
                             placeholder="CEO, CTO, Fundador..."
+                            onCopy={(e) => e.preventDefault()}
+                            onCut={(e) => e.preventDefault()}
+                            onPaste={(e) => e.preventDefault()}
                           />
                         </div>
                       </div>
@@ -1208,11 +1188,6 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
                     {message.subject && (
                       <div className="text-blue-300 font-medium mb-2">
                         Assunto: {message.subject}
-                      </div>
-                    )}
-                    {message.recipientEmail && (
-                      <div className="text-gray-400 text-sm mb-2">
-                        📧 {message.recipientEmail}
                       </div>
                     )}
                     <p className="text-gray-300 whitespace-pre-wrap">{message.content}</p>
