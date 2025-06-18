@@ -24,6 +24,25 @@ interface MailerSendResponse {
   error?: string;
 }
 
+// Função para obter a API key do Firestore
+async function getMailerSendApiKey(): Promise<string | null> {
+  try {
+    const configDoc = await admin.firestore()
+      .collection('config')
+      .doc('mailersend')
+      .get();
+    
+    if (configDoc.exists) {
+      const data = configDoc.data();
+      return data?.apiKey || null;
+    }
+    return null;
+  } catch (error) {
+    console.error('Erro ao obter API key do Firestore:', error);
+    return null;
+  }
+}
+
 // Função para enviar email via MailerSend
 export const sendEmail = functions.https.onCall(async (data: EmailRequest, context) => {
   // Verificar autenticação
@@ -116,12 +135,11 @@ async function sendMailerSendEmail(emailData: {
   
   const { recipientEmail, recipientName, subject, content, senderName } = emailData;
 
-  // Obter API key do MailerSend das configurações do Firebase Functions
-  const config = functions.config();
-  const apiKey = config.mailersend?.api_key;
+  // Obter API key do Firestore
+  const apiKey = await getMailerSendApiKey();
 
   if (!apiKey) {
-    console.error('API key do MailerSend não configurada');
+    console.error('API key do MailerSend não configurada no Firestore');
     return { success: false, error: 'API key não configurada' };
   }
 
