@@ -77,7 +77,10 @@ export const sendEmail = functions.https.onCall(async (data: EmailRequest, conte
       });
     }
 
-    // Registrar no Firestore - sempre como 'sent' por enquanto
+    // Determinar status baseado no resultado do envio
+    const status = mailersendResult.success ? 'sent' : 'failed';
+
+    // Registrar no Firestore com status correto
     const messageData = {
       startupId,
       userId: context.auth.uid,
@@ -88,7 +91,7 @@ export const sendEmail = functions.https.onCall(async (data: EmailRequest, conte
       recipientType: 'startup', // ou 'founder' dependendo do contexto
       recipientEmail: messageType === 'email' ? recipientEmail : undefined,
       subject: messageType === 'email' ? subject : undefined,
-      status: 'sent', // Sempre marcar como enviado por enquanto
+      status: status,
       mailersendId: mailersendResult.mailersendId || undefined
     };
 
@@ -101,7 +104,7 @@ export const sendEmail = functions.https.onCall(async (data: EmailRequest, conte
         messageId: messageRef.id,
         recipientEmail,
         subject,
-        status: 'sent', // Sempre marcar como enviado por enquanto
+        status: status,
         mailersendId: mailersendResult.mailersendId || null,
         sentAt: admin.firestore.FieldValue.serverTimestamp(),
         error: mailersendResult.error || null
@@ -109,7 +112,7 @@ export const sendEmail = functions.https.onCall(async (data: EmailRequest, conte
     }
 
     return {
-      success: true, // Sempre retornar sucesso
+      success: mailersendResult.success,
       messageId: messageRef.id,
       mailersendId: mailersendResult.mailersendId,
       error: mailersendResult.error
@@ -138,8 +141,8 @@ async function sendMailerSendEmail(emailData: {
   if (!apiKey) {
     console.error('API key do MailerSend não configurada no Firestore');
     return { 
-      success: true, // Retornar sucesso mesmo sem API key
-      error: 'API key não configurada - mensagem registrada localmente' 
+      success: false,
+      error: 'API key não configurada' 
     };
   }
 
@@ -229,8 +232,8 @@ async function sendMailerSendEmail(emailData: {
     } else {
       console.log('MailerSend unexpected status:', response.status);
       return {
-        success: true, // Retornar sucesso mesmo com status inesperado
-        error: `Status HTTP: ${response.status} - mensagem registrada localmente`
+        success: false,
+        error: `Status HTTP: ${response.status}`
       };
     }
 
@@ -248,10 +251,9 @@ async function sendMailerSendEmail(emailData: {
       errorMessage = error.message || 'Erro desconhecido';
     }
     
-    // Sempre retornar sucesso, mas registrar o erro para debug
     return {
-      success: true,
-      error: `${errorMessage} - mensagem registrada localmente`
+      success: false,
+      error: errorMessage
     };
   }
 }
