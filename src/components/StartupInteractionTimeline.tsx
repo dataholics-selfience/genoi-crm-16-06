@@ -14,7 +14,8 @@ import {
   where, 
   orderBy, 
   getDocs,
-  addDoc 
+  addDoc,
+  increment 
 } from 'firebase/firestore';
 import { db, auth } from '../firebase';
 import { StartupType } from '../types';
@@ -71,6 +72,10 @@ const PIPELINE_STAGES = [
   { id: 'poc', name: 'POC', color: 'bg-orange-200 text-orange-800 border-orange-300' }
 ];
 
+const EMAIL_TOKEN_COST = 10;
+const DAILY_EMAIL_LIMIT = 100;
+const MONTHLY_EMAIL_LIMIT = 3000;
+
 const NewMessageModal = ({ 
   isOpen, 
   onClose, 
@@ -90,24 +95,28 @@ const NewMessageModal = ({
   const [emailSubject, setEmailSubject] = useState('');
   const [isSending, setIsSending] = useState(false);
   const [senderName, setSenderName] = useState('');
+  const [userCompany, setUserCompany] = useState('');
 
   useEffect(() => {
-    const fetchSenderName = async () => {
+    const fetchSenderData = async () => {
       if (!auth.currentUser) return;
       
       try {
         const userDoc = await getDoc(doc(db, 'users', auth.currentUser.uid));
         if (userDoc.exists()) {
-          setSenderName(userDoc.data().name || 'Equipe Gen.OI');
+          const userData = userDoc.data();
+          setSenderName(userData.name || 'Equipe Gen.OI');
+          setUserCompany(userData.company || 'Empresa');
         }
       } catch (error) {
-        console.error('Error fetching sender name:', error);
+        console.error('Error fetching sender data:', error);
         setSenderName('Equipe Gen.OI');
+        setUserCompany('Empresa');
       }
     };
 
     if (isOpen) {
-      fetchSenderName();
+      fetchSenderData();
       // Reset form when modal opens
       setNewMessage('');
       setEmailSubject('');
@@ -116,6 +125,82 @@ const NewMessageModal = ({
       setMessageType('email');
     }
   }, [isOpen]);
+
+  const checkEmailLimits = async () => {
+    if (!auth.currentUser) return { canSend: false, reason: 'Usuário não autenticado' };
+
+    try {
+      // Check user tokens
+      const tokenDoc = await getDoc(doc(db, 'tokenUsage', auth.currentUser.uid));
+      if (!tokenDoc.exists()) {
+        return { canSend: false, reason: 'Dados de token não encontrados' };
+      }
+
+      const tokenData = tokenDoc.data();
+      const remainingTokens = tokenData.totalTokens - tokenData.usedTokens;
+      
+      if (remainingTokens < EMAIL_TOKEN_COST) {
+        return { 
+          canSend: false, 
+          reason: `Tokens insuficientes. Você precisa de ${EMAIL_TOKEN_COST} tokens para enviar um email, mas possui apenas ${remainingTokens} tokens restantes.` 
+        };
+      }
+
+      // Check daily limit for user
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const tomorrow = new Date(today);
+      tomorrow.setDate(tomorrow.getDate() + 1);
+
+      const dailyQuery = query(
+        collection(db, 'emailLogs'),
+        where('userId', '==', auth.currentUser.uid),
+        where('sentAt', '>=', today.toISOString()),
+        where('sentAt', '<', tomorrow.toISOString())
+      );
+
+      const dailySnapshot = await getDocs(dailyQuery);
+      const dailyCount = dailySnapshot.size;
+
+      if (dailyCount >= DAILY_EMAIL_LIMIT) {
+        return { 
+          canSend: false, 
+          reason: `Limite diário atingido. Você já enviou ${dailyCount} emails hoje. Limite: ${DAILY_EMAIL_LIMIT} emails por dia.` 
+        };
+      }
+
+      // Check monthly platform limit
+      const firstDayOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+      const firstDayOfNextMonth = new Date(today.getFullYear(), today.getMonth() + 1, 1);
+
+      const monthlyQuery = query(
+        collection(db, 'emailLogs'),
+        where('sentAt', '>=', firstDayOfMonth.toISOString()),
+        where('sentAt', '<', firstDayOfNextMonth.toISOString())
+      );
+
+      const monthlySnapshot = await getDocs(monthlyQuery);
+      const monthlyCount = monthlySnapshot.size;
+
+      if (monthlyCount >= MONTHLY_EMAIL_LIMIT) {
+        return { 
+          canSend: false, 
+          reason: `Limite mensal da plataforma atingido. A plataforma já enviou ${monthlyCount} emails este mês. Limite: ${MONTHLY_EMAIL_LIMIT} emails por mês.` 
+        };
+      }
+
+      return { 
+        canSend: true, 
+        dailyCount, 
+        monthlyCount, 
+        remainingTokens 
+      };
+
+    } catch (error) {
+      console.error('Error checking email limits:', error);
+      return { canSend: false, reason: 'Erro ao verificar limites de email' };
+    }
+  };
 
   const handleRecipientChange = (value: string) => {
     setSelectedRecipient(value);
@@ -149,6 +234,17 @@ const NewMessageModal = ({
           return;
         }
 
+        // Check email limits
+        const limitCheck = await checkEmailLimits();
+        if (!limitCheck.canSend) {
+          alert(limitCheck.reason);
+          setIsSending(false);
+          return;
+        }
+
+        // Create subject with company and startup names
+        const fullSubject = `A ${userCompany} deseja contatar a ${startupData.startupName} - ${emailSubject}`;
+
         // Template HTML do email com domínios corretos
         const htmlContent = `
           <!DOCTYPE html>
@@ -174,8 +270,7 @@ const NewMessageModal = ({
                       
                       <div style="font-size: 14px; color: #666;">
                           <p><strong>Atenciosamente,</strong><br>
-                          ${senderName}<br>
-                          <em>Agente de Inovação Aberta - Gen.OI</em></p>
+                          Genie, sua agente IA de inovação aberta</p>
                           
                           <p style="margin-top: 20px;">
                               <strong>Gen.OI</strong><br>
@@ -206,7 +301,7 @@ const NewMessageModal = ({
             email: 'contact@genoi.com.br',  // Usando o domínio validado
             name: 'Gen.OI - Inovação Aberta'
           },
-          subject: emailSubject,
+          subject: fullSubject,
           html: htmlContent,
           text: newMessage.trim(),
           reply_to: {
@@ -224,6 +319,24 @@ const NewMessageModal = ({
           }
         });
 
+        // Log the email
+        await addDoc(collection(db, 'emailLogs'), {
+          userId: auth.currentUser.uid,
+          userEmail: auth.currentUser.email,
+          recipientEmail: selectedRecipientEmail,
+          recipientName: selectedRecipient,
+          subject: fullSubject,
+          startupId: startupData.id,
+          startupName: startupData.startupName,
+          sentAt: new Date().toISOString(),
+          mailersendId: emailDoc.id
+        });
+
+        // Deduct tokens
+        await updateDoc(doc(db, 'tokenUsage', auth.currentUser.uid), {
+          usedTokens: increment(EMAIL_TOKEN_COST)
+        });
+
         console.log('Email document created with ID:', emailDoc.id);
       }
 
@@ -237,7 +350,7 @@ const NewMessageModal = ({
         recipientName: selectedRecipient,
         recipientType: selectedRecipientType,
         recipientEmail: messageType === 'email' ? selectedRecipientEmail : undefined,
-        subject: messageType === 'email' ? emailSubject : undefined,
+        subject: messageType === 'email' ? `A ${userCompany} deseja contatar a ${startupData.startupName} - ${emailSubject}` : undefined,
         status: 'sent'
       };
 
@@ -259,7 +372,7 @@ const NewMessageModal = ({
 
       // Show success message
       if (messageType === 'email') {
-        alert(`Email enviado com sucesso!\n\nDe: contact@genoi.com.br\nPara: ${selectedRecipientEmail}\nAssunto: ${emailSubject}\n\nO email será processado pela extensão MailerSend.`);
+        alert(`Email enviado com sucesso!\n\nDe: contact@genoi.com.br\nPara: ${selectedRecipientEmail}\nAssunto: A ${userCompany} deseja contatar a ${startupData.startupName} - ${emailSubject}\n\nO email será processado pela extensão MailerSend.\n\n${EMAIL_TOKEN_COST} tokens foram descontados da sua conta.`);
       } else {
         alert('Mensagem WhatsApp registrada. Envie manualmente através do WhatsApp.');
       }
@@ -337,6 +450,9 @@ const NewMessageModal = ({
                 className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                 required
               />
+              <div className="text-xs text-gray-400 mt-1">
+                Assunto final: "A {userCompany} deseja contatar a {startupData.startupName} - {emailSubject || '[seu assunto]'}"
+              </div>
             </div>
           )}
 
@@ -363,10 +479,13 @@ const NewMessageModal = ({
             <div className="text-xs text-gray-400 bg-gray-700 p-3 rounded">
               <strong>ℹ️ Configuração do Email:</strong>
               <ul className="mt-1 space-y-1">
-                <li>• <strong>Remetente:</strong> contact@genoi.com.br ({senderName})</li>
+                <li>• <strong>Remetente:</strong> contact@genoi.com.br (Genie, sua agente IA)</li>
                 <li>• <strong>Responder para:</strong> contact@genoi.net</li>
-                <li>• <strong>Processamento:</strong> Extensão oficial MailerSend</li>
+                <li>• <strong>Processamento:</strong> Enviado por Gen.OI</li>
                 <li>• <strong>Domínio validado:</strong> genoi.com.br ✅</li>
+                <li>• <strong>Custo:</strong> {EMAIL_TOKEN_COST} tokens por email</li>
+                <li>• <strong>Limite diário:</strong> {DAILY_EMAIL_LIMIT} emails por usuário</li>
+                <li>• <strong>Limite mensal:</strong> {MONTHLY_EMAIL_LIMIT} emails na plataforma</li>
                 <li>• O email será formatado automaticamente com a identidade visual da Gen.OI</li>
               </ul>
             </div>
@@ -383,7 +502,7 @@ const NewMessageModal = ({
               ) : (
                 <Send size={16} />
               )}
-              {isSending ? 'Enviando...' : messageType === 'email' ? 'Enviar Email' : 'Registrar WhatsApp'}
+              {isSending ? 'Enviando...' : messageType === 'email' ? `Enviar Email (-${EMAIL_TOKEN_COST} tokens)` : 'Registrar WhatsApp'}
             </button>
             <button
               onClick={onClose}
@@ -1063,7 +1182,7 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
                         )}
                         {message.status === 'sent' && message.type === 'email' && (
                           <span className="text-green-400 text-xs bg-green-900/20 px-2 py-1 rounded">
-                            Enviado via MailerSend
+                            Enviado por Gen.OI
                           </span>
                         )}
                         {message.status === 'delivered' && (
