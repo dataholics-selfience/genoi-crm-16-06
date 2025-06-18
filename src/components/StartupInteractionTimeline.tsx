@@ -16,6 +16,7 @@ import {
   getDocs,
   addDoc 
 } from 'firebase/firestore';
+import { getFunctions, httpsCallable } from 'firebase/functions';
 import { db, auth } from '../firebase';
 import { StartupType } from '../types';
 import { format } from 'date-fns';
@@ -54,7 +55,7 @@ interface CRMMessage {
   recipientType: 'startup' | 'founder';
   recipientEmail?: string;
   subject?: string;
-  status?: 'sent' | 'failed';
+  status?: 'sent' | 'failed' | 'delivered';
   mailersendId?: string;
 }
 
@@ -70,79 +71,6 @@ const PIPELINE_STAGES = [
   { id: 'entrevistada', name: 'Entrevistada', color: 'bg-green-200 text-green-800 border-green-300' },
   { id: 'poc', name: 'POC', color: 'bg-orange-200 text-orange-800 border-orange-300' }
 ];
-
-// Função para enviar email via MailerSend diretamente
-const sendEmailDirect = async (emailData: {
-  recipientEmail: string;
-  recipientName: string;
-  subject: string;
-  content: string;
-  senderName: string;
-}) => {
-  const { recipientEmail, recipientName, subject, content, senderName } = emailData;
-
-  const htmlContent = `
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <meta charset="utf-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Mensagem da Gen.OI</title>
-    </head>
-    <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
-        <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 30px; text-align: center; border-radius: 10px 10px 0 0;">
-            <img src="https://genoi.net/wp-content/uploads/2024/12/Logo-gen.OI-Novo-1-2048x1035.png" alt="Gen.OI" style="height: 60px; margin-bottom: 20px;">
-            <h1 style="color: white; margin: 0; font-size: 24px;">Gen.OI - Inovação Aberta</h1>
-        </div>
-        
-        <div style="background: #f8f9fa; padding: 30px; border-radius: 0 0 10px 10px;">
-            <div style="background: white; padding: 25px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
-                <div style="white-space: pre-wrap; margin-bottom: 25px; font-size: 16px;">
-                    ${content.replace(/\n/g, '<br>')}
-                </div>
-                
-                <hr style="border: none; border-top: 1px solid #eee; margin: 25px 0;">
-                
-                <div style="font-size: 14px; color: #666;">
-                    <p><strong>Atenciosamente,</strong><br>
-                    ${senderName}<br>
-                    <em>Agente de Inovação Aberta - Gen.OI</em></p>
-                    
-                    <p style="margin-top: 20px;">
-                        <strong>Gen.OI</strong><br>
-                        Conectando empresas às melhores startups do mundo<br>
-                        🌐 <a href="https://genoi.net" style="color: #667eea;">genoi.net</a><br>
-                        📧 <a href="mailto:contact@genoi.net" style="color: #667eea;">contact@genoi.net</a>
-                    </p>
-                </div>
-            </div>
-        </div>
-        
-        <div style="text-align: center; margin-top: 20px; font-size: 12px; color: #999;">
-            <p>Esta mensagem foi enviada através da plataforma Gen.OI de inovação aberta.</p>
-        </div>
-    </body>
-    </html>
-  `;
-
-  // Por enquanto, vamos simular o envio do email
-  // Em produção, você deve configurar as Firebase Functions ou usar um proxy backend
-  console.log('Email que seria enviado:', {
-    to: recipientEmail,
-    subject,
-    content,
-    html: htmlContent
-  });
-
-  // Simular delay de envio
-  await new Promise(resolve => setTimeout(resolve, 1000));
-
-  // Retornar sucesso simulado
-  return {
-    success: true,
-    mailersendId: `sim_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
-  };
-};
 
 const NewMessageModal = ({ 
   isOpen, 
@@ -163,6 +91,9 @@ const NewMessageModal = ({
   const [emailSubject, setEmailSubject] = useState('');
   const [isSending, setIsSending] = useState(false);
   const [senderName, setSenderName] = useState('');
+
+  const functions = getFunctions();
+  const sendEmailFunction = httpsCallable(functions, 'sendEmail');
 
   useEffect(() => {
     const fetchSenderName = async () => {
@@ -209,81 +140,83 @@ const NewMessageModal = ({
     setIsSending(true);
 
     try {
-      let messageStatus: 'sent' | 'failed' = 'sent';
-      let mailersendId: string | undefined;
-
-      // Send email if it's an email message
-      if (messageType === 'email' && selectedRecipientEmail) {
+      // Validações específicas para email
+      if (messageType === 'email') {
         if (!emailSubject.trim()) {
           alert('Por favor, preencha o assunto do email.');
           setIsSending(false);
           return;
         }
-
-        try {
-          const result = await sendEmailDirect({
-            recipientEmail: selectedRecipientEmail,
-            recipientName: selectedRecipient,
-            subject: emailSubject,
-            content: newMessage,
-            senderName: senderName
-          });
-
-          if (result.success) {
-            mailersendId = result.mailersendId;
-            console.log('Email enviado com sucesso!');
-          } else {
-            throw new Error('Erro ao enviar email');
-          }
-        } catch (error: any) {
-          console.error('Error sending email:', error);
-          messageStatus = 'failed';
+        if (!selectedRecipientEmail) {
+          alert('Email do destinatário não encontrado.');
+          setIsSending(false);
+          return;
         }
-      } else if (messageType === 'whatsapp') {
-        // For WhatsApp, we just record the message
-        console.log('Mensagem WhatsApp registrada');
       }
 
-      // Save message to Firestore
-      const messageData: Omit<CRMMessage, 'id'> = {
-        startupId: startupData.id,
-        userId: auth.currentUser.uid,
-        type: messageType,
-        content: newMessage.trim(),
-        sentAt: new Date().toISOString(),
+      // Chamar Firebase Function para enviar email
+      const result = await sendEmailFunction({
+        recipientEmail: selectedRecipientEmail,
         recipientName: selectedRecipient,
-        recipientType: selectedRecipientType,
-        recipientEmail: selectedRecipientEmail || undefined,
-        subject: messageType === 'email' ? emailSubject : undefined,
-        status: messageStatus,
-        mailersendId: mailersendId || undefined
-      };
+        subject: emailSubject,
+        content: newMessage.trim(),
+        senderName: senderName,
+        startupId: startupData.id,
+        messageType: messageType
+      });
 
-      const docRef = await addDoc(collection(db, 'crmMessages'), messageData);
-      
-      const newCrmMessage: CRMMessage = {
-        id: docRef.id,
-        ...messageData
-      };
+      const data = result.data as any;
 
-      onMessageSent(newCrmMessage);
-      
-      // Reset form
-      setNewMessage('');
-      setEmailSubject('');
-      setSelectedRecipient('');
-      setSelectedRecipientEmail('');
-      onClose();
+      if (data.success) {
+        // Criar objeto da mensagem para atualizar a UI
+        const newCrmMessage: CRMMessage = {
+          id: data.messageId,
+          startupId: startupData.id,
+          userId: auth.currentUser.uid,
+          type: messageType,
+          content: newMessage.trim(),
+          sentAt: new Date().toISOString(),
+          recipientName: selectedRecipient,
+          recipientType: selectedRecipientType,
+          recipientEmail: selectedRecipientEmail || undefined,
+          subject: messageType === 'email' ? emailSubject : undefined,
+          status: 'sent',
+          mailersendId: data.mailersendId || undefined
+        };
 
-      // Show success message
-      if (messageType === 'email') {
-        alert(messageStatus === 'sent' ? 'Email registrado com sucesso!' : 'Email registrado, mas houve falha no envio');
+        onMessageSent(newCrmMessage);
+        
+        // Reset form
+        setNewMessage('');
+        setEmailSubject('');
+        setSelectedRecipient('');
+        setSelectedRecipientEmail('');
+        onClose();
+
+        // Show success message
+        if (messageType === 'email') {
+          alert('Email enviado com sucesso!');
+        } else {
+          alert('Mensagem WhatsApp registrada. Envie manualmente através do WhatsApp.');
+        }
       } else {
-        alert('Mensagem WhatsApp registrada. Envie manualmente através do WhatsApp.');
+        throw new Error(data.error || 'Erro desconhecido');
       }
-    } catch (error) {
+
+    } catch (error: any) {
       console.error('Error sending message:', error);
-      alert('Erro ao registrar mensagem. Tente novamente.');
+      
+      let errorMessage = 'Erro ao enviar mensagem. Tente novamente.';
+      
+      if (error.code === 'functions/unauthenticated') {
+        errorMessage = 'Usuário não autenticado. Faça login novamente.';
+      } else if (error.code === 'functions/invalid-argument') {
+        errorMessage = 'Dados inválidos. Verifique os campos obrigatórios.';
+      } else if (error.message) {
+        errorMessage = error.message;
+      }
+      
+      alert(errorMessage);
     } finally {
       setIsSending(false);
     }
@@ -369,10 +302,10 @@ const NewMessageModal = ({
             <div className="text-xs text-gray-400 bg-gray-700 p-3 rounded">
               <strong>ℹ️ Informações do Email:</strong>
               <ul className="mt-1 space-y-1">
-                <li>• Remetente: Agente de inovação aberta - Genie</li>
+                <li>• Remetente: {senderName} - Agente de inovação aberta</li>
                 <li>• Responder para: contact@genoi.net</li>
                 <li>• O email será formatado automaticamente com a identidade visual da Gen.OI</li>
-                <li>• Por enquanto, o email será registrado no sistema (configuração de envio em desenvolvimento)</li>
+                <li>• O email será enviado via MailerSend</li>
               </ul>
             </div>
           )}
@@ -388,7 +321,7 @@ const NewMessageModal = ({
               ) : (
                 <Send size={16} />
               )}
-              {isSending ? 'Enviando...' : messageType === 'email' ? 'Registrar Email' : 'Registrar WhatsApp'}
+              {isSending ? 'Enviando...' : messageType === 'email' ? 'Enviar Email' : 'Registrar WhatsApp'}
             </button>
             <button
               onClick={onClose}
@@ -509,7 +442,8 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
         const messagesSnapshot = await getDocs(messagesQuery);
         const allMessages = messagesSnapshot.docs.map(doc => ({
           id: doc.id,
-          ...doc.data()
+          ...doc.data(),
+          sentAt: doc.data().sentAt?.toDate?.()?.toISOString() || doc.data().sentAt
         })) as CRMMessage[];
 
         // Filter messages by current user in memory and sort by sentAt descending
@@ -1067,7 +1001,12 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
                         )}
                         {message.status === 'sent' && message.type === 'email' && (
                           <span className="text-green-400 text-xs bg-green-900/20 px-2 py-1 rounded">
-                            Registrado
+                            Enviado
+                          </span>
+                        )}
+                        {message.status === 'delivered' && (
+                          <span className="text-blue-400 text-xs bg-blue-900/20 px-2 py-1 rounded">
+                            Entregue
                           </span>
                         )}
                       </div>
