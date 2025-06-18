@@ -149,7 +149,7 @@ const NewMessageModal = ({
           return;
         }
 
-        // Template HTML do email
+        // Template HTML do email com domínios corretos
         const htmlContent = `
           <!DOCTYPE html>
           <html>
@@ -194,8 +194,8 @@ const NewMessageModal = ({
           </html>
         `;
 
-        // Enviar email usando a extensão oficial do MailerSend
-        await addDoc(collection(db, 'emails'), {
+        // Enviar email usando a extensão oficial do MailerSend com domínios corretos
+        const emailDoc = await addDoc(collection(db, 'emails'), {
           to: [
             {
               email: selectedRecipientEmail,
@@ -203,14 +203,14 @@ const NewMessageModal = ({
             }
           ],
           from: {
-            email: 'noreply@genoi.net',
+            email: 'contact@genoi.com.br',  // Usando o domínio validado
             name: 'Gen.OI - Inovação Aberta'
           },
           subject: emailSubject,
           html: htmlContent,
           text: newMessage.trim(),
           reply_to: {
-            email: 'contact@genoi.net',
+            email: 'contact@genoi.net',  // Responder para genoi.net conforme solicitado
             name: 'Gen.OI - Suporte'
           },
           tags: ['crm', 'startup-interaction'],
@@ -219,9 +219,12 @@ const NewMessageModal = ({
             startupId: startupData.id,
             userId: auth.currentUser.uid,
             recipientType: selectedRecipientType,
-            senderName: senderName
+            senderName: senderName,
+            timestamp: new Date().toISOString()
           }
         });
+
+        console.log('Email document created with ID:', emailDoc.id);
       }
 
       // Registrar a mensagem no CRM
@@ -235,7 +238,7 @@ const NewMessageModal = ({
         recipientType: selectedRecipientType,
         recipientEmail: messageType === 'email' ? selectedRecipientEmail : undefined,
         subject: messageType === 'email' ? emailSubject : undefined,
-        status: messageType === 'email' ? 'sent' : 'sent'
+        status: 'sent'
       };
 
       const docRef = await addDoc(collection(db, 'crmMessages'), messageData);
@@ -256,7 +259,7 @@ const NewMessageModal = ({
 
       // Show success message
       if (messageType === 'email') {
-        alert('Email enviado com sucesso via MailerSend!');
+        alert(`Email enviado com sucesso!\n\nDe: contact@genoi.com.br\nPara: ${selectedRecipientEmail}\nAssunto: ${emailSubject}\n\nO email será processado pela extensão MailerSend.`);
       } else {
         alert('Mensagem WhatsApp registrada. Envie manualmente através do WhatsApp.');
       }
@@ -267,9 +270,11 @@ const NewMessageModal = ({
       let errorMessage = 'Erro ao enviar mensagem. Tente novamente.';
       
       if (error.code === 'permission-denied') {
-        errorMessage = 'Permissão negada. Verifique suas credenciais.';
+        errorMessage = 'Permissão negada. Verifique se a extensão MailerSend está instalada e configurada corretamente.';
+      } else if (error.code === 'not-found') {
+        errorMessage = 'Coleção "emails" não encontrada. Verifique se a extensão MailerSend está instalada.';
       } else if (error.message) {
-        errorMessage = error.message;
+        errorMessage = `Erro: ${error.message}`;
       }
       
       alert(errorMessage);
@@ -336,8 +341,8 @@ const NewMessageModal = ({
           )}
 
           {selectedRecipientEmail && messageType === 'email' && (
-            <div className="text-sm text-gray-400">
-              📧 Será enviado para: {selectedRecipientEmail}
+            <div className="text-sm text-gray-400 bg-gray-700 p-2 rounded">
+              📧 Será enviado para: <strong>{selectedRecipientEmail}</strong>
             </div>
           )}
 
@@ -356,12 +361,13 @@ const NewMessageModal = ({
 
           {messageType === 'email' && (
             <div className="text-xs text-gray-400 bg-gray-700 p-3 rounded">
-              <strong>ℹ️ Informações do Email:</strong>
+              <strong>ℹ️ Configuração do Email:</strong>
               <ul className="mt-1 space-y-1">
-                <li>• Remetente: {senderName} - Agente de inovação aberta</li>
-                <li>• Responder para: contact@genoi.net</li>
+                <li>• <strong>Remetente:</strong> contact@genoi.com.br ({senderName})</li>
+                <li>• <strong>Responder para:</strong> contact@genoi.net</li>
+                <li>• <strong>Processamento:</strong> Extensão oficial MailerSend</li>
+                <li>• <strong>Domínio validado:</strong> genoi.com.br ✅</li>
                 <li>• O email será formatado automaticamente com a identidade visual da Gen.OI</li>
-                <li>• O email será enviado via extensão oficial do MailerSend</li>
               </ul>
             </div>
           )}
