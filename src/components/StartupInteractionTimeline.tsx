@@ -1,11 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { 
-  ArrowLeft, Mail, Globe, Linkedin, Phone, User, Building2, 
-  Calendar, Edit3, Save, X, Plus, Send, MessageSquare, 
-  ExternalLink, Users, Briefcase, ChevronLeft, ChevronRight,
-  Bot, BotOff
-} from 'lucide-react';
+import { ArrowLeft, Mail, Globe, Linkedin, Phone, User, Building2, Calendar, Edit3, Save, X, Plus, Send, MessageSquare, ExternalLink, Users, Briefcase, ChevronLeft, ChevronRight, Bot, NutOff as BotOff } from 'lucide-react';
 import { 
   doc, 
   getDoc, 
