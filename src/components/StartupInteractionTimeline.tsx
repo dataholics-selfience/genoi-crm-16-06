@@ -111,17 +111,17 @@ const formatPhoneNumber = (phone: string): string => {
 // Função para enviar mensagem via Evolution API
 const sendMessageToWhatsApp = async (number: string, message: string): Promise<any> => {
   const formattedNumber = formatPhoneNumber(number);
+  const instanceKey = '33B96FBA8E3F-4156-8196-65174145F266';
   
   try {
-    const response = await fetch('https://evolution-api-production-f719.up.railway.app/message/sendText', {
+    const response = await fetch(`https://evolution-api-production-f719.up.railway.app/message/sendText/${instanceKey}`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
         number: formattedNumber,
-        text: message,
-        instance_key: '33B96FBA8E3F-4156-8196-65174145F266'
+        text: message
       })
     });
 
