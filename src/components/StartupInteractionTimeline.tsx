@@ -112,15 +112,15 @@ const formatPhoneNumber = (phone: string): string => {
 const sendMessageToWhatsApp = async (number: string, message: string): Promise<any> => {
   const formattedNumber = formatPhoneNumber(number);
   
-  const response = await fetch('https://evolution-api-production-f719.up.railway.app/send-message', {
+  const response = await fetch('https://evolution-api-production-f719.up.railway.app/message/sendText/33B96FBA8E3F-4156-8196-65174145F266', {
     method: 'POST',
     headers: {
-      'Content-Type': 'application/json'
+      'Content-Type': 'application/json',
+      'apikey': '33B96FBA8E3F-4156-8196-65174145F266'
     },
     body: JSON.stringify({
       number: formattedNumber,
-      message: message,
-      instance_key: '33B96FBA8E3F-4156-8196-65174145F266'
+      text: message
     })
   });
 
@@ -338,7 +338,7 @@ const NewMessageModal = ({
           // Enviar mensagem via Evolution API
           whatsappResponse = await sendMessageToWhatsApp(selectedRecipientPhone, newMessage);
           
-          if (!whatsappResponse.success) {
+          if (!whatsappResponse.key) {
             messageStatus = 'failed';
           }
         } catch (error) {
@@ -348,8 +348,8 @@ const NewMessageModal = ({
         }
       }
 
-      // Registrar a mensagem no CRM
-      const messageData: Omit<CRMMessage, 'id'> = {
+      // Registrar a mensagem no CRM - construir objeto sem campos undefined
+      const messageData: any = {
         startupId: startupData.id,
         userId: auth.currentUser.uid,
         type: messageType,
@@ -357,12 +357,19 @@ const NewMessageModal = ({
         sentAt: new Date().toISOString(),
         recipientName: selectedRecipient,
         recipientType: selectedRecipientType,
-        recipientEmail: messageType === 'email' ? selectedRecipientEmail : undefined,
-        recipientPhone: messageType === 'whatsapp' ? selectedRecipientPhone : undefined,
-        subject: messageType === 'email' ? `A ${userCompany} deseja contatar a ${startupData.startupName} - ${emailSubject}` : undefined,
-        status: messageStatus,
-        whatsappResponse: messageType === 'whatsapp' ? whatsappResponse : undefined
+        status: messageStatus
       };
+
+      // Adicionar campos específicos apenas se não forem undefined
+      if (messageType === 'email' && selectedRecipientEmail) {
+        messageData.recipientEmail = selectedRecipientEmail;
+        messageData.subject = `A ${userCompany} deseja contatar a ${startupData.startupName} - ${emailSubject}`;
+      }
+
+      if (messageType === 'whatsapp' && selectedRecipientPhone) {
+        messageData.recipientPhone = selectedRecipientPhone;
+        messageData.whatsappResponse = whatsappResponse;
+      }
 
       const docRef = await addDoc(collection(db, 'crmMessages'), messageData);
       
