@@ -273,21 +273,35 @@ const NewMessageModal = ({
         console.log('WhatsApp message sent via webhook:', data);
       }
 
-      // Registrar a mensagem no CRM
-      const messageData: Omit<CRMMessage, 'id'> = {
+      // Registrar a mensagem no CRM - Create base object with required fields
+      const messageData: any = {
         startupId: startupData.id,
         userId: auth.currentUser.uid,
         type: messageType,
         content: newMessage.trim(),
         sentAt: new Date().toISOString(),
-        recipientName: selectedRecipient,
         recipientType: selectedRecipientType,
-        recipientEmail: messageType === 'email' ? selectedRecipientEmail : undefined,
-        recipientPhone: messageType === 'whatsapp' ? selectedRecipientPhone : undefined,
-        subject: messageType === 'email' ? emailSubject : undefined,
         status: 'sent',
         isAiGenerated: false
       };
+
+      // Only add optional fields if they have valid values
+      if (selectedRecipient) {
+        messageData.recipientName = selectedRecipient;
+      }
+
+      if (messageType === 'email') {
+        if (selectedRecipientEmail) {
+          messageData.recipientEmail = selectedRecipientEmail;
+        }
+        if (emailSubject.trim()) {
+          messageData.subject = emailSubject.trim();
+        }
+      }
+
+      if (messageType === 'whatsapp' && selectedRecipientPhone) {
+        messageData.recipientPhone = selectedRecipientPhone;
+      }
 
       const docRef = await addDoc(collection(db, 'crmMessages'), messageData);
       
@@ -834,19 +848,25 @@ Se o modo for 'auto', envie automaticamente via WhatsApp. Se for 'manual', apena
       if (data[0]?.output) {
         const aiMessage = data[0].output;
 
-        // Record the AI-generated message in CRM
-        const messageData: Omit<CRMMessage, 'id'> = {
+        // Record the AI-generated message in CRM - Create base object with required fields
+        const messageData: any = {
           startupId: startupData.id,
           userId: auth.currentUser.uid,
           type: 'whatsapp',
           content: aiMessage,
           sentAt: new Date().toISOString(),
-          recipientName: contactName,
           recipientType: founderWithWhatsApp ? 'founder' : 'startup',
-          recipientPhone: contactPhone,
           status: startupData.autoMessaging ? 'sent' : 'generated',
           isAiGenerated: true
         };
+
+        // Only add optional fields if they have valid values
+        if (contactName) {
+          messageData.recipientName = contactName;
+        }
+        if (contactPhone) {
+          messageData.recipientPhone = contactPhone;
+        }
 
         const docRef = await addDoc(collection(db, 'crmMessages'), messageData);
         
