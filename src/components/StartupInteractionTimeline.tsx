@@ -256,7 +256,7 @@ const NewMessageModal = ({
           messageType: 'manual'
         };
 
-        const response = await fetch('https://primary-production-2e3b.up.railway.app/webhook/genie', {
+        const response = await fetch('https://primary-production-2e3b.up.railway.app/webhook-test/genie', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -828,7 +828,7 @@ Se o modo for 'auto', envie automaticamente via WhatsApp. Se for 'manual', apena
         autoSend: startupData.autoMessaging
       };
 
-      const response = await fetch('https://primary-production-2e3b.up.railway.app/webhook/genie', {
+      const response = await fetch('https://primary-production-2e3b.up.railway.app/webhook-test/genie', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
