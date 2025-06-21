@@ -112,23 +112,28 @@ const formatPhoneNumber = (phone: string): string => {
 const sendMessageToWhatsApp = async (number: string, message: string): Promise<any> => {
   const formattedNumber = formatPhoneNumber(number);
   
-  const response = await fetch('https://evolution-api-production-f719.up.railway.app/message/sendText/33B96FBA8E3F-4156-8196-65174145F266', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'apikey': '33B96FBA8E3F-4156-8196-65174145F266'
-    },
-    body: JSON.stringify({
-      number: formattedNumber,
-      text: message
-    })
-  });
+  try {
+    const response = await fetch('https://evolution-api-production-f719.up.railway.app/api/send-message', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'apikey': '33B96FBA8E3F-4156-8196-65174145F266'
+      },
+      body: JSON.stringify({
+        number: formattedNumber,
+        text: message
+      })
+    });
 
-  if (!response.ok) {
-    throw new Error(`HTTP error! status: ${response.status}`);
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+
+    return await response.json();
+  } catch (error) {
+    console.error('Error in sendMessageToWhatsApp:', error);
+    throw error;
   }
-
-  return await response.json();
 };
 
 const NewMessageModal = ({ 
