@@ -342,7 +342,7 @@ const NewMessageModal = ({
         }
 
         try {
-          // Enviar mensagem via Evolution API com URL corrigida
+          // Usar a função sendMessageToWhatsApp que já tem a URL correta
           whatsappResponse = await sendMessageToWhatsApp(selectedRecipientPhone, newMessage);
           
           if (!whatsappResponse || !whatsappResponse.key) {
