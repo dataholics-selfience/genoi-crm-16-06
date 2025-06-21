@@ -236,7 +236,7 @@ const NewMessageModal = ({
           return;
         }
 
-        // Enviar WhatsApp via webhook /genie
+        // Enviar WhatsApp via webhook /genie com melhor tratamento de erro
         const whatsappPayload = {
           message: newMessage.trim(),
           sessionId: `whatsapp_${startupData.id}_${Date.now()}`,
@@ -256,21 +256,39 @@ const NewMessageModal = ({
           messageType: 'manual'
         };
 
-        const response = await fetch('https://primary-production-2e3b.up.railway.app/webhook-test/genie', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(whatsappPayload),
-        });
+        try {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
 
-        if (!response.ok) {
-          const errorText = await response.text();
-          throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
+          const response = await fetch('https://primary-production-2e3b.up.railway.app/webhook-test/genie', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(whatsappPayload),
+            signal: controller.signal
+          });
+
+          clearTimeout(timeoutId);
+
+          if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`Erro do servidor: ${response.status} - ${errorText}`);
+          }
+
+          const data = await response.json();
+          console.log('WhatsApp message sent via webhook:', data);
+        } catch (error: any) {
+          console.error('WhatsApp webhook error:', error);
+          
+          if (error.name === 'AbortError') {
+            throw new Error('Timeout: O serviço de WhatsApp não respondeu em tempo hábil. Tente novamente.');
+          } else if (error.message.includes('Failed to fetch')) {
+            throw new Error('Erro de conectividade: Não foi possível conectar ao serviço de WhatsApp. Verifique sua conexão com a internet e tente novamente.');
+          } else {
+            throw new Error(`Erro ao enviar WhatsApp: ${error.message}`);
+          }
         }
-
-        const data = await response.json();
-        console.log('WhatsApp message sent via webhook:', data);
       }
 
       // Registrar a mensagem no CRM - Create base object with required fields
@@ -337,7 +355,7 @@ const NewMessageModal = ({
       } else if (error.code === 'not-found') {
         errorMessage = 'Coleção "emails" não encontrada. Verifique se a extensão MailerSend está instalada.';
       } else if (error.message) {
-        errorMessage = `Erro: ${error.message}`;
+        errorMessage = error.message;
       }
       
       alert(errorMessage);
@@ -456,6 +474,7 @@ const NewMessageModal = ({
                 <li>• <strong>Processamento:</strong> Webhook Genie + Evolution API</li>
                 <li>• <strong>Instância:</strong> ca93fa89-e9c8-4606-9b74-6bc49a5bccac ✅</li>
                 <li>• A mensagem será enviada automaticamente via WhatsApp</li>
+                <li>• <strong>Nota:</strong> Requer conexão com serviço externo</li>
               </ul>
             </div>
           )}
@@ -828,65 +847,83 @@ Se o modo for 'auto', envie automaticamente via WhatsApp. Se for 'manual', apena
         autoSend: startupData.autoMessaging
       };
 
-      const response = await fetch('https://primary-production-2e3b.up.railway.app/webhook-test/genie', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(aiPayload),
-      });
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 45000); // 45 second timeout for AI generation
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
-      }
+        const response = await fetch('https://primary-production-2e3b.up.railway.app/webhook-test/genie', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(aiPayload),
+          signal: controller.signal
+        });
 
-      const data = await response.json();
-      console.log('AI message generated via webhook:', data);
+        clearTimeout(timeoutId);
 
-      // Process the AI response
-      if (data[0]?.output) {
-        const aiMessage = data[0].output;
-
-        // Record the AI-generated message in CRM - Create base object with required fields
-        const messageData: any = {
-          startupId: startupData.id,
-          userId: auth.currentUser.uid,
-          type: 'whatsapp',
-          content: aiMessage,
-          sentAt: new Date().toISOString(),
-          recipientType: founderWithWhatsApp ? 'founder' : 'startup',
-          status: startupData.autoMessaging ? 'sent' : 'generated',
-          isAiGenerated: true
-        };
-
-        // Only add optional fields if they have valid values
-        if (contactName) {
-          messageData.recipientName = contactName;
-        }
-        if (contactPhone) {
-          messageData.recipientPhone = contactPhone;
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(`Erro do servidor: ${response.status} - ${errorText}`);
         }
 
-        const docRef = await addDoc(collection(db, 'crmMessages'), messageData);
+        const data = await response.json();
+        console.log('AI message generated via webhook:', data);
+
+        // Process the AI response
+        if (data[0]?.output) {
+          const aiMessage = data[0].output;
+
+          // Record the AI-generated message in CRM - Create base object with required fields
+          const messageData: any = {
+            startupId: startupData.id,
+            userId: auth.currentUser.uid,
+            type: 'whatsapp',
+            content: aiMessage,
+            sentAt: new Date().toISOString(),
+            recipientType: founderWithWhatsApp ? 'founder' : 'startup',
+            status: startupData.autoMessaging ? 'sent' : 'generated',
+            isAiGenerated: true
+          };
+
+          // Only add optional fields if they have valid values
+          if (contactName) {
+            messageData.recipientName = contactName;
+          }
+          if (contactPhone) {
+            messageData.recipientPhone = contactPhone;
+          }
+
+          const docRef = await addDoc(collection(db, 'crmMessages'), messageData);
+          
+          const newCrmMessage: CRMMessage = {
+            id: docRef.id,
+            ...messageData
+          };
+
+          setCrmMessages(prev => [newCrmMessage, ...prev]);
+
+          if (startupData.autoMessaging) {
+            alert(`Mensagem IA enviada automaticamente!\n\nPara: ${contactPhone}\nContato: ${contactName}\n\nMensagem: ${aiMessage.substring(0, 100)}...`);
+          } else {
+            alert(`Mensagem IA gerada com sucesso!\n\nPara: ${contactName}\nTelefone: ${contactPhone}\n\nVerifique a timeline para revisar antes de enviar.`);
+          }
+        }
+      } catch (error: any) {
+        console.error('AI webhook error:', error);
         
-        const newCrmMessage: CRMMessage = {
-          id: docRef.id,
-          ...messageData
-        };
-
-        setCrmMessages(prev => [newCrmMessage, ...prev]);
-
-        if (startupData.autoMessaging) {
-          alert(`Mensagem IA enviada automaticamente!\n\nPara: ${contactPhone}\nContato: ${contactName}\n\nMensagem: ${aiMessage.substring(0, 100)}...`);
+        if (error.name === 'AbortError') {
+          throw new Error('Timeout: O serviço de IA não respondeu em tempo hábil. Tente novamente.');
+        } else if (error.message.includes('Failed to fetch')) {
+          throw new Error('Erro de conectividade: Não foi possível conectar ao serviço de IA. Verifique sua conexão com a internet e tente novamente.');
         } else {
-          alert(`Mensagem IA gerada com sucesso!\n\nPara: ${contactName}\nTelefone: ${contactPhone}\n\nVerifique a timeline para revisar antes de enviar.`);
+          throw new Error(`Erro ao gerar mensagem IA: ${error.message}`);
         }
       }
 
     } catch (error: any) {
       console.error('Error generating AI message:', error);
-      alert(`Erro ao gerar mensagem IA: ${error.message}`);
+      alert(error.message || 'Erro ao gerar mensagem IA. Tente novamente.');
     } finally {
       setIsGeneratingAI(false);
     }
