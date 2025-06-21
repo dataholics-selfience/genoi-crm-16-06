@@ -113,15 +113,15 @@ const sendMessageToWhatsApp = async (number: string, message: string): Promise<a
   const formattedNumber = formatPhoneNumber(number);
   
   try {
-    const response = await fetch('https://evolution-api-production-f719.up.railway.app/send-message', {
+    const response = await fetch('https://evolution-api-production-f719.up.railway.app/api/sendText', {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json',
-        'apikey': '33B96FBA8E3F-4156-8196-65174145F266'
+        'Content-Type': 'application/json'
       },
       body: JSON.stringify({
         number: formattedNumber,
-        text: message
+        text: message,
+        instance_key: '33B96FBA8E3F-4156-8196-65174145F266'
       })
     });
 
