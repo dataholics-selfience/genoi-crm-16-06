@@ -113,7 +113,7 @@ const sendMessageToWhatsApp = async (number: string, message: string): Promise<a
   const formattedNumber = formatPhoneNumber(number);
   
   try {
-    const response = await fetch('https://evolution-api-production-f719.up.railway.app/api/send-message', {
+    const response = await fetch('https://evolution-api-production-f719.up.railway.app/message/sendText', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -126,10 +126,12 @@ const sendMessageToWhatsApp = async (number: string, message: string): Promise<a
     });
 
     if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
+      const errorText = await response.text();
+      throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
     }
 
-    return await response.json();
+    const result = await response.json();
+    return result;
   } catch (error) {
     console.error('Error in sendMessageToWhatsApp:', error);
     throw error;
@@ -343,7 +345,7 @@ const NewMessageModal = ({
           // Enviar mensagem via Evolution API
           whatsappResponse = await sendMessageToWhatsApp(selectedRecipientPhone, newMessage);
           
-          if (!whatsappResponse.key) {
+          if (!whatsappResponse || !whatsappResponse.key) {
             messageStatus = 'failed';
           }
         } catch (error) {
