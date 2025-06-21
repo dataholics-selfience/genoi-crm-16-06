@@ -168,7 +168,7 @@ const ChatInterface = ({ messages, addMessage, toggleSidebar, isSidebarOpen, cur
           scrollToBottom();
         }, 3000);
 
-        const response = await fetch('https://primary-production-2e3b.up.railway.app/webhook-test/genie2', {
+        const response = await fetch('https://primary-production-2e3b.up.railway.app/webhook/production', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
