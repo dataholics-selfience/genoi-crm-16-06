@@ -1,6 +1,11 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, Mail, Globe, Linkedin, Phone, User, Building2, Calendar, Edit3, Save, X, Plus, Send, MessageSquare, ExternalLink, Users, Briefcase, ChevronLeft, ChevronRight, Bot, NutOff as BotOff } from 'lucide-react';
+import { 
+  ArrowLeft, Mail, Globe, Linkedin, Phone, User, Building2, 
+  Calendar, Edit3, Save, X, Plus, Send, MessageSquare, 
+  ExternalLink, Users, Briefcase, ChevronLeft, ChevronRight,
+  Bot, BotOff, Sparkles
+} from 'lucide-react';
 import { 
   doc, 
   getDoc, 
@@ -50,6 +55,7 @@ interface CRMMessage {
   recipientName?: string;
   recipientType: 'startup' | 'founder';
   recipientEmail?: string;
+  recipientPhone?: string;
   subject?: string;
   status?: 'sent' | 'failed' | 'delivered' | 'generated';
   mailersendId?: string;
@@ -85,6 +91,7 @@ const NewMessageModal = ({
   const [selectedRecipient, setSelectedRecipient] = useState('');
   const [selectedRecipientType, setSelectedRecipientType] = useState<'startup' | 'founder'>('startup');
   const [selectedRecipientEmail, setSelectedRecipientEmail] = useState('');
+  const [selectedRecipientPhone, setSelectedRecipientPhone] = useState('');
   const [emailSubject, setEmailSubject] = useState('');
   const [isSending, setIsSending] = useState(false);
   const [senderName, setSenderName] = useState('');
@@ -111,6 +118,7 @@ const NewMessageModal = ({
       setEmailSubject('');
       setSelectedRecipient('');
       setSelectedRecipientEmail('');
+      setSelectedRecipientPhone('');
       setMessageType('email');
     }
   }, [isOpen]);
@@ -121,10 +129,12 @@ const NewMessageModal = ({
     if (value === startupData?.startupName) {
       setSelectedRecipientType('startup');
       setSelectedRecipientEmail(startupData.email);
+      setSelectedRecipientPhone(startupData.whatsapp);
     } else {
       setSelectedRecipientType('founder');
       const founder = startupData.founders?.find(f => f.name === value);
       setSelectedRecipientEmail(founder?.email || '');
+      setSelectedRecipientPhone(founder?.whatsapp || '');
     }
   };
 
@@ -134,8 +144,8 @@ const NewMessageModal = ({
     setIsSending(true);
 
     try {
+      // Validações específicas para email
       if (messageType === 'email') {
-        // Validações específicas para email
         if (!emailSubject.trim()) {
           alert('Por favor, preencha o assunto do email.');
           setIsSending(false);
@@ -223,53 +233,6 @@ const NewMessageModal = ({
         });
 
         console.log('Email document created with ID:', emailDoc.id);
-      } else if (messageType === 'whatsapp') {
-        // Enviar WhatsApp usando Evolution API
-        let whatsappNumber = '';
-        
-        if (selectedRecipientType === 'startup') {
-          whatsappNumber = startupData.whatsapp;
-        } else {
-          const founder = startupData.founders?.find(f => f.name === selectedRecipient);
-          whatsappNumber = founder?.whatsapp || '';
-        }
-
-        if (!whatsappNumber) {
-          alert('Número de WhatsApp não encontrado para o destinatário selecionado.');
-          setIsSending(false);
-          return;
-        }
-
-        // Limpar o número (remover caracteres especiais)
-        const cleanNumber = whatsappNumber.replace(/\D/g, '');
-        
-        const instanceKey = "ca93fa89-e9c8-4606-9b74-6bc49a5bccac";
-        
-        try {
-          const response = await fetch(`https://evolution-api-production-f719.up.railway.app/message/sendText/${instanceKey}`, {
-            method: "POST",
-            headers: { 
-              "Content-Type": "application/json" 
-            },
-            body: JSON.stringify({
-              number: cleanNumber,
-              text: newMessage.trim()
-            })
-          });
-
-          if (!response.ok) {
-            const error = await response.text();
-            throw new Error(`Erro HTTP! status: ${response.status}, message: ${error}`);
-          }
-
-          const data = await response.json();
-          console.log("Mensagem WhatsApp enviada com sucesso:", data);
-          
-          alert(`WhatsApp enviado com sucesso!\n\nPara: ${whatsappNumber}\nMensagem: ${newMessage.trim()}`);
-        } catch (error) {
-          console.error("Erro ao enviar WhatsApp:", error);
-          throw new Error(`Erro ao enviar WhatsApp: ${error instanceof Error ? error.message : 'Erro desconhecido'}`);
-        }
       }
 
       // Registrar a mensagem no CRM
@@ -282,6 +245,7 @@ const NewMessageModal = ({
         recipientName: selectedRecipient,
         recipientType: selectedRecipientType,
         recipientEmail: messageType === 'email' ? selectedRecipientEmail : undefined,
+        recipientPhone: messageType === 'whatsapp' ? selectedRecipientPhone : undefined,
         subject: messageType === 'email' ? emailSubject : undefined,
         status: 'sent',
         generatedBy: 'manual'
@@ -301,11 +265,14 @@ const NewMessageModal = ({
       setEmailSubject('');
       setSelectedRecipient('');
       setSelectedRecipientEmail('');
+      setSelectedRecipientPhone('');
       onClose();
 
-      // Show success message for email
+      // Show success message
       if (messageType === 'email') {
         alert(`Email enviado com sucesso!\n\nDe: contact@genoi.com.br\nPara: ${selectedRecipientEmail}\nAssunto: ${emailSubject}\n\nO email será processado pela extensão MailerSend.`);
+      } else {
+        alert('Mensagem WhatsApp registrada. Envie manualmente através do WhatsApp.');
       }
 
     } catch (error: any) {
@@ -359,18 +326,10 @@ const NewMessageModal = ({
               className="flex-1 px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
               <option value="">Selecione o destinatário</option>
-              {startupData.email && messageType === 'email' && (
+              {startupData.email && (
                 <option value={startupData.startupName}>{startupData.startupName} (Geral)</option>
               )}
-              {startupData.whatsapp && messageType === 'whatsapp' && (
-                <option value={startupData.startupName}>{startupData.startupName} (Geral)</option>
-              )}
-              {startupData.founders?.filter(founder => 
-                founder.name.trim() && (
-                  (messageType === 'email' && founder.email.trim()) ||
-                  (messageType === 'whatsapp' && founder.whatsapp.trim())
-                )
-              ).map((founder) => (
+              {startupData.founders?.filter(founder => founder.name.trim() && (messageType === 'whatsapp' || founder.email.trim())).map((founder) => (
                 <option key={founder.id} value={founder.name}>
                   {founder.name} {founder.cargo && `(${founder.cargo})`}
                 </option>
@@ -398,9 +357,9 @@ const NewMessageModal = ({
             </div>
           )}
 
-          {messageType === 'whatsapp' && selectedRecipient && (
+          {selectedRecipientPhone && messageType === 'whatsapp' && (
             <div className="text-sm text-gray-400 bg-gray-700 p-2 rounded">
-              📱 Será enviado via WhatsApp para: <strong>{selectedRecipient}</strong>
+              📱 Será enviado para: <strong>{selectedRecipientPhone}</strong>
             </div>
           )}
 
@@ -430,18 +389,6 @@ const NewMessageModal = ({
             </div>
           )}
 
-          {messageType === 'whatsapp' && (
-            <div className="text-xs text-gray-400 bg-gray-700 p-3 rounded">
-              <strong>ℹ️ Configuração do WhatsApp:</strong>
-              <ul className="mt-1 space-y-1">
-                <li>• <strong>API:</strong> Evolution API</li>
-                <li>• <strong>Instância:</strong> ca93fa89-e9c8-4606-9b74-6bc49a5bccac ✅</li>
-                <li>• <strong>Status:</strong> Conectada e ativa</li>
-                <li>• A mensagem será enviada automaticamente via WhatsApp</li>
-              </ul>
-            </div>
-          )}
-
           <div className="flex gap-2">
             <button
               onClick={handleSendMessage}
@@ -453,316 +400,13 @@ const NewMessageModal = ({
               ) : (
                 <Send size={16} />
               )}
-              {isSending ? 'Enviando...' : messageType === 'email' ? 'Enviar Email' : 'Enviar WhatsApp'}
+              {isSending ? 'Enviando...' : messageType === 'email' ? 'Enviar Email' : 'Registrar WhatsApp'}
             </button>
             <button
               onClick={onClose}
               className="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-white font-medium"
             >
               Cancelar
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-const AIMessageModal = ({ 
-  isOpen, 
-  onClose, 
-  startupData, 
-  onMessageSent,
-  mode = 'auto'
-}: {
-  isOpen: boolean;
-  onClose: () => void;
-  startupData: StartupInteractionData;
-  onMessageSent: (message: CRMMessage) => void;
-  mode?: 'auto' | 'manual';
-}) => {
-  const [isGenerating, setIsGenerating] = useState(false);
-  const [generatedMessage, setGeneratedMessage] = useState('');
-  const [senderName, setSenderName] = useState('');
-  const [senderRole, setSenderRole] = useState('');
-
-  useEffect(() => {
-    const fetchSenderData = async () => {
-      if (!auth.currentUser) return;
-      
-      try {
-        const userDoc = await getDoc(doc(db, 'users', auth.currentUser.uid));
-        if (userDoc.exists()) {
-          const userData = userDoc.data();
-          setSenderName(userData.name || 'Daniel Mendes');
-          setSenderRole('CEO da Gen.OI');
-        }
-      } catch (error) {
-        console.error('Error fetching sender data:', error);
-        setSenderName('Daniel Mendes');
-        setSenderRole('CEO da Gen.OI');
-      }
-    };
-
-    if (isOpen) {
-      fetchSenderData();
-      setGeneratedMessage('');
-    }
-  }, [isOpen]);
-
-  const handleGenerateMessage = async () => {
-    if (!auth.currentUser || !startupData) return;
-
-    setIsGenerating(true);
-
-    try {
-      // Preparar dados para o webhook do n8n
-      const webhookPayload = {
-        startup: {
-          id: startupData.id,
-          name: startupData.startupName,
-          contact: {
-            name: startupData.founders?.[0]?.name || 'Contato',
-            phone: startupData.whatsapp || startupData.founders?.[0]?.whatsapp || ''
-          },
-          segment: startupData.startupData.category || 'Tecnologia',
-          problem: startupData.startupData.description || 'Desafio de inovação'
-        },
-        context: {
-          userName: senderName,
-          userRole: senderRole
-        },
-        mode: mode
-      };
-
-      console.log('Enviando payload para webhook Genie:', webhookPayload);
-
-      // Chamar o webhook do n8n
-      const response = await fetch('https://primary-production-2e3b.up.railway.app/webhook/genie', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(webhookPayload)
-      });
-
-      if (!response.ok) {
-        throw new Error(`Erro HTTP! status: ${response.status}`);
-      }
-
-      const data = await response.json();
-      console.log('Resposta do webhook Genie:', data);
-
-      if (data.message) {
-        setGeneratedMessage(data.message);
-        
-        // Se for modo manual, apenas mostra a mensagem gerada
-        if (mode === 'manual') {
-          // Registrar a mensagem gerada no CRM
-          const messageData: Omit<CRMMessage, 'id'> = {
-            startupId: startupData.id,
-            userId: auth.currentUser.uid,
-            type: 'ai_generated',
-            content: data.message,
-            sentAt: new Date().toISOString(),
-            recipientName: startupData.founders?.[0]?.name || startupData.startupName,
-            recipientType: startupData.founders?.[0]?.name ? 'founder' : 'startup',
-            status: 'generated',
-            generatedBy: 'ai'
-          };
-
-          const docRef = await addDoc(collection(db, 'crmMessages'), messageData);
-          
-          const newCrmMessage: CRMMessage = {
-            id: docRef.id,
-            ...messageData
-          };
-
-          onMessageSent(newCrmMessage);
-        }
-      } else {
-        throw new Error('Nenhuma mensagem foi gerada pela IA');
-      }
-
-    } catch (error) {
-      console.error('Erro ao gerar mensagem via IA:', error);
-      alert(`Erro ao gerar mensagem: ${error instanceof Error ? error.message : 'Erro desconhecido'}`);
-    } finally {
-      setIsGenerating(false);
-    }
-  };
-
-  const handleSendGeneratedMessage = async () => {
-    if (!generatedMessage.trim() || !startupData.whatsapp) return;
-
-    setIsGenerating(true);
-
-    try {
-      // Enviar via WhatsApp usando Evolution API
-      const cleanNumber = startupData.whatsapp.replace(/\D/g, '');
-      const instanceKey = "ca93fa89-e9c8-4606-9b74-6bc49a5bccac";
-      
-      const response = await fetch(`https://evolution-api-production-f719.up.railway.app/message/sendText/${instanceKey}`, {
-        method: "POST",
-        headers: { 
-          "Content-Type": "application/json" 
-        },
-        body: JSON.stringify({
-          number: cleanNumber,
-          text: generatedMessage.trim()
-        })
-      });
-
-      if (!response.ok) {
-        const error = await response.text();
-        throw new Error(`Erro HTTP! status: ${response.status}, message: ${error}`);
-      }
-
-      const data = await response.json();
-      console.log("Mensagem IA enviada via WhatsApp:", data);
-
-      // Registrar como enviada
-      const messageData: Omit<CRMMessage, 'id'> = {
-        startupId: startupData.id,
-        userId: auth.currentUser!.uid,
-        type: 'whatsapp',
-        content: generatedMessage.trim(),
-        sentAt: new Date().toISOString(),
-        recipientName: startupData.founders?.[0]?.name || startupData.startupName,
-        recipientType: startupData.founders?.[0]?.name ? 'founder' : 'startup',
-        status: 'sent',
-        generatedBy: 'ai'
-      };
-
-      const docRef = await addDoc(collection(db, 'crmMessages'), messageData);
-      
-      const newCrmMessage: CRMMessage = {
-        id: docRef.id,
-        ...messageData
-      };
-
-      onMessageSent(newCrmMessage);
-      onClose();
-
-      alert(`Mensagem IA enviada com sucesso!\n\nPara: ${startupData.whatsapp}\nMensagem: ${generatedMessage.trim()}`);
-
-    } catch (error) {
-      console.error('Erro ao enviar mensagem gerada:', error);
-      alert(`Erro ao enviar mensagem: ${error instanceof Error ? error.message : 'Erro desconhecido'}`);
-    } finally {
-      setIsGenerating(false);
-    }
-  };
-
-  if (!isOpen) return null;
-
-  return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-gray-800 rounded-lg p-6 w-full max-w-2xl mx-4 max-h-[90vh] overflow-y-auto">
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center gap-2">
-            <Bot className="text-blue-400" size={20} />
-            <h3 className="text-lg font-bold text-white">Mensagem via IA</h3>
-          </div>
-          <button
-            onClick={onClose}
-            className="text-gray-400 hover:text-white"
-          >
-            <X size={20} />
-          </button>
-        </div>
-        
-        <div className="space-y-4">
-          <div className="bg-gray-700 p-4 rounded-lg">
-            <h4 className="text-white font-medium mb-2">Dados da Startup:</h4>
-            <ul className="text-gray-300 text-sm space-y-1">
-              <li>• <strong>Nome:</strong> {startupData.startupName}</li>
-              <li>• <strong>Segmento:</strong> {startupData.startupData.category}</li>
-              <li>• <strong>Contato:</strong> {startupData.founders?.[0]?.name || 'Não informado'}</li>
-              <li>• <strong>WhatsApp:</strong> {startupData.whatsapp || 'Não informado'}</li>
-            </ul>
-          </div>
-
-          {!generatedMessage ? (
-            <div className="text-center py-8">
-              <button
-                onClick={handleGenerateMessage}
-                disabled={isGenerating}
-                className="flex items-center justify-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg text-white font-medium mx-auto"
-              >
-                {isGenerating ? (
-                  <>
-                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                    Gerando mensagem...
-                  </>
-                ) : (
-                  <>
-                    <Bot size={16} />
-                    Gerar Mensagem via IA
-                  </>
-                )}
-              </button>
-              <p className="text-gray-400 text-sm mt-2">
-                A IA irá gerar uma mensagem personalizada baseada nos dados da startup
-              </p>
-            </div>
-          ) : (
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm text-gray-300 mb-2">Mensagem Gerada pela IA:</label>
-                <div className="bg-gray-700 p-4 rounded-lg border border-blue-500">
-                  <p className="text-white whitespace-pre-wrap">{generatedMessage}</p>
-                </div>
-              </div>
-
-              {mode === 'manual' && startupData.whatsapp && (
-                <div className="flex gap-2">
-                  <button
-                    onClick={handleSendGeneratedMessage}
-                    disabled={isGenerating}
-                    className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg text-white font-medium"
-                  >
-                    {isGenerating ? (
-                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                    ) : (
-                      <Send size={16} />
-                    )}
-                    {isGenerating ? 'Enviando...' : 'Enviar via WhatsApp'}
-                  </button>
-                  <button
-                    onClick={handleGenerateMessage}
-                    disabled={isGenerating}
-                    className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg text-white font-medium"
-                  >
-                    Gerar Nova
-                  </button>
-                </div>
-              )}
-
-              {mode === 'auto' && (
-                <div className="bg-green-900/20 border border-green-600 p-3 rounded-lg">
-                  <p className="text-green-400 text-sm">
-                    ✅ Mensagem gerada e enviada automaticamente via WhatsApp
-                  </p>
-                </div>
-              )}
-
-              {!startupData.whatsapp && (
-                <div className="bg-yellow-900/20 border border-yellow-600 p-3 rounded-lg">
-                  <p className="text-yellow-400 text-sm">
-                    ⚠️ Número de WhatsApp não cadastrado para esta startup
-                  </p>
-                </div>
-              )}
-            </div>
-          )}
-
-          <div className="flex gap-2">
-            <button
-              onClick={onClose}
-              className="flex-1 px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-white font-medium"
-            >
-              Fechar
             </button>
           </div>
         </div>
@@ -835,7 +479,7 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
   const [crmMessages, setCrmMessages] = useState<CRMMessage[]>([]);
   const [loading, setLoading] = useState(true);
   const [showNewMessageModal, setShowNewMessageModal] = useState(false);
-  const [showAIMessageModal, setShowAIMessageModal] = useState(false);
+  const [isGeneratingAI, setIsGeneratingAI] = useState(false);
 
   useEffect(() => {
     const fetchStartupData = async () => {
@@ -864,7 +508,7 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
           founders: data.founders || [],
           startupData: startup,
           stage: data.stage || 'mapeada',
-          autoMessaging: data.autoMessaging !== undefined ? data.autoMessaging : true
+          autoMessaging: data.autoMessaging || false
         };
 
         setStartupData(interactionData);
@@ -962,6 +606,111 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
     
     const newValue = !startupData.autoMessaging;
     await handleUpdateStartupField('autoMessaging', newValue);
+  };
+
+  const handleGenerateAIMessage = async () => {
+    if (!auth.currentUser || !startupData || isGeneratingAI) return;
+
+    setIsGeneratingAI(true);
+
+    try {
+      // Get user data for context
+      const userDoc = await getDoc(doc(db, 'users', auth.currentUser.uid));
+      const userData = userDoc.data();
+      
+      if (!userData) {
+        alert('Dados do usuário não encontrados');
+        return;
+      }
+
+      // Get primary contact (first founder with phone or startup whatsapp)
+      let contactName = startupData.startupName;
+      let contactPhone = startupData.whatsapp;
+      
+      if (startupData.founders && startupData.founders.length > 0) {
+        const founderWithPhone = startupData.founders.find(f => f.whatsapp.trim());
+        if (founderWithPhone) {
+          contactName = founderWithPhone.name;
+          contactPhone = founderWithPhone.whatsapp;
+        }
+      }
+
+      if (!contactPhone) {
+        alert('Número de WhatsApp não encontrado para esta startup ou seus fundadores.');
+        return;
+      }
+
+      // Create message for n8n webhook using same pattern as main chat
+      const aiMessage = `Gere uma mensagem comercial personalizada para WhatsApp para a startup ${startupData.startupName}. 
+
+Contexto:
+- Startup: ${startupData.startupName}
+- Contato: ${contactName}
+- Telefone: ${contactPhone}
+- Segmento: ${startupData.startupData.category || 'Não especificado'}
+- Vertical: ${startupData.startupData.vertical || 'Não especificado'}
+- Descrição: ${startupData.description}
+- Remetente: ${userData.name || 'Equipe Gen.OI'}
+- Empresa: ${userData.company || 'Gen.OI'}
+- Modo: ${startupData.autoMessaging ? 'auto' : 'manual'}
+
+Gere uma mensagem comercial profissional, personalizada e amigável para primeiro contato. A mensagem deve ser direta, mencionar a Gen.OI como plataforma de inovação aberta, e sugerir uma conversa sobre possíveis sinergias. Mantenha o tom profissional mas acessível.`;
+
+      console.log('Sending AI message to n8n webhook:', aiMessage);
+
+      // Send to n8n webhook using same pattern as main chat
+      const response = await fetch('https://primary-production-2e3b.up.railway.app/webhook/production', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: aiMessage,
+          sessionId: `ai-whatsapp-${startupId}-${Date.now()}`,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to send message to n8n webhook');
+      }
+
+      const data = await response.json();
+      if (data[0]?.output) {
+        const aiGeneratedMessage = data[0].output;
+
+        // Register the AI-generated message in CRM
+        const messageData: Omit<CRMMessage, 'id'> = {
+          startupId: startupData.id,
+          userId: auth.currentUser.uid,
+          type: 'ai_generated',
+          content: aiGeneratedMessage,
+          sentAt: new Date().toISOString(),
+          recipientName: contactName,
+          recipientType: startupData.founders?.some(f => f.name === contactName) ? 'founder' : 'startup',
+          recipientPhone: contactPhone,
+          status: startupData.autoMessaging ? 'sent' : 'generated',
+          generatedBy: 'ai'
+        };
+
+        const docRef = await addDoc(collection(db, 'crmMessages'), messageData);
+        
+        const newCrmMessage: CRMMessage = {
+          id: docRef.id,
+          ...messageData
+        };
+
+        setCrmMessages(prev => [newCrmMessage, ...prev]);
+
+        if (startupData.autoMessaging) {
+          alert(`Mensagem IA gerada e enviada automaticamente via WhatsApp para ${contactName} (${contactPhone})`);
+        } else {
+          alert(`Mensagem IA gerada com sucesso! Verifique a timeline para revisar antes de enviar.`);
+        }
+      }
+    } catch (error) {
+      console.error('Error generating AI message:', error);
+      alert('Erro ao gerar mensagem via IA. Tente novamente.');
+    } finally {
+      setIsGeneratingAI(false);
+    }
   };
 
   const handleAddFounder = async () => {
@@ -1092,15 +841,27 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
           <div className="flex items-center gap-2">
             <button
               onClick={handleToggleAutoMessaging}
-              className={`flex items-center gap-2 px-3 py-1 rounded-lg text-sm font-medium transition-colors ${
+              className={`flex items-center gap-2 px-3 py-1 rounded-lg text-sm font-medium transition-all ${
                 startupData.autoMessaging
                   ? 'bg-green-600 hover:bg-green-700 text-white'
-                  : 'bg-gray-600 hover:bg-gray-700 text-white'
+                  : 'bg-gray-600 hover:bg-gray-700 text-gray-300'
               }`}
               title={startupData.autoMessaging ? 'Mensagens automáticas ativadas' : 'Mensagens automáticas desativadas'}
             >
               {startupData.autoMessaging ? <Bot size={16} /> : <BotOff size={16} />}
               {startupData.autoMessaging ? 'Auto' : 'Manual'}
+            </button>
+            <button
+              onClick={handleGenerateAIMessage}
+              disabled={isGeneratingAI}
+              className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg text-white font-medium transition-all shadow-lg hover:shadow-xl"
+            >
+              {isGeneratingAI ? (
+                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+              ) : (
+                <Sparkles size={16} />
+              )}
+              {isGeneratingAI ? 'Gerando...' : '✉️ Mensagem via IA'}
             </button>
           </div>
         </div>
@@ -1415,22 +1176,13 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
           <div className="p-4 border-b border-gray-700">
             <div className="flex items-center justify-between">
               <h3 className="text-lg font-bold text-white">Timeline de Interações</h3>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => setShowAIMessageModal(true)}
-                  className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 rounded-lg text-white font-medium transition-all shadow-lg hover:shadow-xl"
-                >
-                  <Bot size={16} />
-                  Enviar Mensagem via IA
-                </button>
-                <button
-                  onClick={() => setShowNewMessageModal(true)}
-                  className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg text-white font-medium transition-colors"
-                >
-                  <Plus size={16} />
-                  Nova Mensagem
-                </button>
-              </div>
+              <button
+                onClick={() => setShowNewMessageModal(true)}
+                className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg text-white font-medium transition-colors"
+              >
+                <Plus size={16} />
+                Nova Mensagem
+              </button>
             </div>
           </div>
 
@@ -1450,13 +1202,13 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
                       <div className="flex items-center gap-2">
                         {message.type === 'email' ? (
                           <Mail size={16} className="text-blue-400" />
-                        ) : message.type === 'whatsapp' ? (
-                          <Phone size={16} className="text-green-400" />
+                        ) : message.type === 'ai_generated' ? (
+                          <Sparkles size={16} className="text-purple-400" />
                         ) : (
-                          <Bot size={16} className="text-purple-400" />
+                          <Phone size={16} className="text-green-400" />
                         )}
                         <span className="text-white font-medium">
-                          {message.type === 'email' ? 'Email' : message.type === 'whatsapp' ? 'WhatsApp' : 'IA Gerada'}
+                          {message.type === 'email' ? 'Email' : message.type === 'ai_generated' ? 'IA WhatsApp' : 'WhatsApp'}
                         </span>
                         {message.recipientName && (
                           <span className="text-gray-400 text-sm">
@@ -1465,7 +1217,7 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
                         )}
                         {message.generatedBy === 'ai' && (
                           <span className="text-purple-400 text-xs bg-purple-900/20 px-2 py-1 rounded">
-                            Gerada por IA
+                            Gerado por IA
                           </span>
                         )}
                         {message.status === 'failed' && (
@@ -1478,14 +1230,14 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
                             Enviado via MailerSend
                           </span>
                         )}
-                        {message.status === 'sent' && message.type === 'whatsapp' && (
+                        {message.status === 'sent' && message.type === 'ai_generated' && (
                           <span className="text-green-400 text-xs bg-green-900/20 px-2 py-1 rounded">
                             Enviado via WhatsApp
                           </span>
                         )}
                         {message.status === 'generated' && (
-                          <span className="text-blue-400 text-xs bg-blue-900/20 px-2 py-1 rounded">
-                            Mensagem Gerada
+                          <span className="text-yellow-400 text-xs bg-yellow-900/20 px-2 py-1 rounded">
+                            Aguardando envio
                           </span>
                         )}
                         {message.status === 'delivered' && (
@@ -1508,6 +1260,11 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
                         📧 {message.recipientEmail}
                       </div>
                     )}
+                    {message.recipientPhone && (
+                      <div className="text-gray-400 text-sm mb-2">
+                        📱 {message.recipientPhone}
+                      </div>
+                    )}
                     <p className="text-gray-300 whitespace-pre-wrap">{message.content}</p>
                     {message.mailersendId && (
                       <div className="text-xs text-gray-500 mt-2">
@@ -1528,15 +1285,6 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
         onClose={() => setShowNewMessageModal(false)}
         startupData={startupData}
         onMessageSent={handleMessageSent}
-      />
-
-      {/* AI Message Modal */}
-      <AIMessageModal
-        isOpen={showAIMessageModal}
-        onClose={() => setShowAIMessageModal(false)}
-        startupData={startupData}
-        onMessageSent={handleMessageSent}
-        mode={startupData.autoMessaging ? 'auto' : 'manual'}
       />
     </div>
   );
