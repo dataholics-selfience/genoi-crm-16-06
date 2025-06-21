@@ -1,6 +1,10 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, Mail, Globe, Linkedin, Phone, User, Building2, Calendar, Edit3, Save, X, Plus, Send, MessageSquare, ExternalLink, Users, Briefcase, ChevronLeft, ChevronRight, Sparkles, Bot, NutOff as BotOff } from 'lucide-react';
+import { 
+  ArrowLeft, Mail, Globe, Linkedin, Phone, User, Building2, 
+  Calendar, Edit3, Save, X, Plus, Send, MessageSquare, 
+  ExternalLink, Users, Briefcase, ChevronLeft, ChevronRight
+} from 'lucide-react';
 import { 
   doc, 
   getDoc, 
@@ -28,7 +32,6 @@ interface StartupInteractionData {
   founders: FounderData[];
   startupData: StartupType;
   stage: string;
-  autoMessaging?: boolean;
 }
 
 interface FounderData {
@@ -54,7 +57,6 @@ interface CRMMessage {
   subject?: string;
   status?: 'sent' | 'failed' | 'delivered';
   mailersendId?: string;
-  isAiGenerated?: boolean;
 }
 
 interface StartupInteractionTimelineProps {
@@ -139,7 +141,77 @@ const NewMessageModal = ({
     setIsSending(true);
 
     try {
-      if (messageType === 'email') {
+      if (messageType === 'whatsapp') {
+        // Validações específicas para WhatsApp
+        if (!selectedRecipientPhone) {
+          alert('Número de WhatsApp do destinatário não encontrado.');
+          setIsSending(false);
+          return;
+        }
+
+        // Enviar mensagem via webhook do n8n
+        const whatsappPayload = {
+          message: newMessage.trim(),
+          sessionId: `whatsapp_${startupData.id}_${Date.now()}`,
+          recipient: {
+            name: selectedRecipient,
+            phone: selectedRecipientPhone,
+            type: selectedRecipientType
+          },
+          startup: {
+            id: startupData.id,
+            name: startupData.startupName
+          },
+          sender: {
+            name: senderName,
+            userId: auth.currentUser.uid
+          },
+          messageType: 'manual',
+          instanceKey: '33B96FBA8E3F-4156-8196-65174145F266'
+        };
+
+        console.log('Sending WhatsApp message via webhook:', whatsappPayload);
+
+        // Create AbortController for timeout
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
+
+        try {
+          const response = await fetch('https://primary-production-2e3b.up.railway.app/webhook-test/genie', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(whatsappPayload),
+            signal: controller.signal
+          });
+
+          clearTimeout(timeoutId);
+
+          if (!response.ok) {
+            const errorText = await response.text();
+            console.error('WhatsApp webhook error:', errorText);
+            throw new Error(`Erro do servidor: ${response.status} - ${errorText}`);
+          }
+
+          const result = await response.json();
+          console.log('WhatsApp webhook response:', result);
+
+          alert(`Mensagem WhatsApp enviada com sucesso!\n\nPara: ${selectedRecipientPhone}\nDestinatário: ${selectedRecipient}\n\nA mensagem foi processada pelo agente IA.`);
+
+        } catch (error: any) {
+          console.error('Error sending WhatsApp message:', error);
+          
+          if (error.name === 'AbortError') {
+            throw new Error('Timeout: A requisição demorou mais de 30 segundos. Verifique sua conexão e tente novamente.');
+          } else if (error.message.includes('Failed to fetch')) {
+            throw new Error('Erro de conectividade: Não foi possível conectar ao serviço de WhatsApp. Verifique sua internet e tente novamente.');
+          } else {
+            throw error;
+          }
+        }
+
+      } else if (messageType === 'email') {
         // Validações específicas para email
         if (!emailSubject.trim()) {
           alert('Por favor, preencha o assunto do email.');
@@ -228,98 +300,22 @@ const NewMessageModal = ({
         });
 
         console.log('Email document created with ID:', emailDoc.id);
-      } else if (messageType === 'whatsapp') {
-        // Validações específicas para WhatsApp
-        if (!selectedRecipientPhone) {
-          alert('Número de WhatsApp do destinatário não encontrado.');
-          setIsSending(false);
-          return;
-        }
-
-        // Enviar WhatsApp via webhook /genie com melhor tratamento de erro
-        const whatsappPayload = {
-          message: newMessage.trim(),
-          sessionId: `whatsapp_${startupData.id}_${Date.now()}`,
-          recipient: {
-            name: selectedRecipient,
-            phone: selectedRecipientPhone,
-            type: selectedRecipientType
-          },
-          startup: {
-            id: startupData.id,
-            name: startupData.startupName
-          },
-          sender: {
-            name: senderName,
-            userId: auth.currentUser.uid
-          },
-          messageType: 'manual'
-        };
-
-        try {
-          const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
-
-          const response = await fetch('https://primary-production-2e3b.up.railway.app/webhook-test/genie', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify(whatsappPayload),
-            signal: controller.signal
-          });
-
-          clearTimeout(timeoutId);
-
-          if (!response.ok) {
-            const errorText = await response.text();
-            throw new Error(`Erro do servidor: ${response.status} - ${errorText}`);
-          }
-
-          const data = await response.json();
-          console.log('WhatsApp message sent via webhook:', data);
-        } catch (error: any) {
-          console.error('WhatsApp webhook error:', error);
-          
-          if (error.name === 'AbortError') {
-            throw new Error('Timeout: O serviço de WhatsApp não respondeu em tempo hábil. Tente novamente.');
-          } else if (error.message.includes('Failed to fetch')) {
-            throw new Error('Erro de conectividade: Não foi possível conectar ao serviço de WhatsApp. Verifique sua conexão com a internet e tente novamente.');
-          } else {
-            throw new Error(`Erro ao enviar WhatsApp: ${error.message}`);
-          }
-        }
       }
 
-      // Registrar a mensagem no CRM - Create base object with required fields
-      const messageData: any = {
+      // Registrar a mensagem no CRM
+      const messageData: Omit<CRMMessage, 'id'> = {
         startupId: startupData.id,
         userId: auth.currentUser.uid,
         type: messageType,
         content: newMessage.trim(),
         sentAt: new Date().toISOString(),
+        recipientName: selectedRecipient,
         recipientType: selectedRecipientType,
-        status: 'sent',
-        isAiGenerated: false
+        recipientEmail: messageType === 'email' ? selectedRecipientEmail : undefined,
+        recipientPhone: messageType === 'whatsapp' ? selectedRecipientPhone : undefined,
+        subject: messageType === 'email' ? emailSubject : undefined,
+        status: 'sent'
       };
-
-      // Only add optional fields if they have valid values
-      if (selectedRecipient) {
-        messageData.recipientName = selectedRecipient;
-      }
-
-      if (messageType === 'email') {
-        if (selectedRecipientEmail) {
-          messageData.recipientEmail = selectedRecipientEmail;
-        }
-        if (emailSubject.trim()) {
-          messageData.subject = emailSubject.trim();
-        }
-      }
-
-      if (messageType === 'whatsapp' && selectedRecipientPhone) {
-        messageData.recipientPhone = selectedRecipientPhone;
-      }
 
       const docRef = await addDoc(collection(db, 'crmMessages'), messageData);
       
@@ -338,11 +334,9 @@ const NewMessageModal = ({
       setSelectedRecipientPhone('');
       onClose();
 
-      // Show success message
+      // Show success message for email
       if (messageType === 'email') {
         alert(`Email enviado com sucesso!\n\nDe: contact@genoi.com.br\nPara: ${selectedRecipientEmail}\nAssunto: ${emailSubject}\n\nO email será processado pela extensão MailerSend.`);
-      } else {
-        alert(`Mensagem WhatsApp enviada com sucesso!\n\nPara: ${selectedRecipientPhone}\nContato: ${selectedRecipient}\n\nA mensagem foi processada via webhook Genie.`);
       }
 
     } catch (error: any) {
@@ -350,12 +344,12 @@ const NewMessageModal = ({
       
       let errorMessage = 'Erro ao enviar mensagem. Tente novamente.';
       
-      if (error.code === 'permission-denied') {
+      if (error.message) {
+        errorMessage = error.message;
+      } else if (error.code === 'permission-denied') {
         errorMessage = 'Permissão negada. Verifique se a extensão MailerSend está instalada e configurada corretamente.';
       } else if (error.code === 'not-found') {
         errorMessage = 'Coleção "emails" não encontrada. Verifique se a extensão MailerSend está instalada.';
-      } else if (error.message) {
-        errorMessage = error.message;
       }
       
       alert(errorMessage);
@@ -396,15 +390,16 @@ const NewMessageModal = ({
               className="flex-1 px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
               <option value="">Selecione o destinatário</option>
-              {messageType === 'email' && startupData.email && (
+              {startupData.email && messageType === 'email' && (
                 <option value={startupData.startupName}>{startupData.startupName} (Geral)</option>
               )}
-              {messageType === 'whatsapp' && startupData.whatsapp && (
-                <option value={startupData.startupName}>{startupData.startupName} (WhatsApp)</option>
+              {startupData.whatsapp && messageType === 'whatsapp' && (
+                <option value={startupData.startupName}>{startupData.startupName} (Geral)</option>
               )}
               {startupData.founders?.filter(founder => 
                 founder.name.trim() && (
-                  messageType === 'email' ? founder.email.trim() : founder.whatsapp.trim()
+                  (messageType === 'email' && founder.email.trim()) ||
+                  (messageType === 'whatsapp' && founder.whatsapp.trim())
                 )
               ).map((founder) => (
                 <option key={founder.id} value={founder.name}>
@@ -471,10 +466,10 @@ const NewMessageModal = ({
               <strong>ℹ️ Configuração do WhatsApp:</strong>
               <ul className="mt-1 space-y-1">
                 <li>• <strong>Remetente:</strong> {senderName} (Gen.OI)</li>
-                <li>• <strong>Processamento:</strong> Webhook Genie + Evolution API</li>
-                <li>• <strong>Instância:</strong> ca93fa89-e9c8-4606-9b74-6bc49a5bccac ✅</li>
-                <li>• A mensagem será enviada automaticamente via WhatsApp</li>
-                <li>• <strong>Nota:</strong> Requer conexão com serviço externo</li>
+                <li>• <strong>Processamento:</strong> Agente IA via n8n + Evolution API</li>
+                <li>• <strong>Instância:</strong> 33B96FBA8E3F-4156-8196-65174145F266</li>
+                <li>• <strong>Modo:</strong> Manual (enviado imediatamente)</li>
+                <li>• A mensagem será enviada via webhook do agente IA</li>
               </ul>
             </div>
           )}
@@ -571,20 +566,12 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
   const [crmMessages, setCrmMessages] = useState<CRMMessage[]>([]);
   const [loading, setLoading] = useState(true);
   const [showNewMessageModal, setShowNewMessageModal] = useState(false);
-  const [isGeneratingAI, setIsGeneratingAI] = useState(false);
-  const [userData, setUserData] = useState<any>(null);
 
   useEffect(() => {
     const fetchStartupData = async () => {
       if (!auth.currentUser) return;
 
       try {
-        // Fetch user data
-        const userDoc = await getDoc(doc(db, 'users', auth.currentUser.uid));
-        if (userDoc.exists()) {
-          setUserData(userDoc.data());
-        }
-
         // Fetch startup data from selectedStartups
         const startupDoc = await getDoc(doc(db, 'selectedStartups', startupId));
         if (!startupDoc.exists()) {
@@ -606,8 +593,7 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
           description: startup.description || '',
           founders: data.founders || [],
           startupData: startup,
-          stage: data.stage || 'mapeada',
-          autoMessaging: data.autoMessaging || false
+          stage: data.stage || 'mapeada'
         };
 
         setStartupData(interactionData);
@@ -642,7 +628,7 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
     fetchStartupData();
   }, [startupId]);
 
-  const handleUpdateStartupField = async (field: keyof StartupInteractionData, value: string | boolean) => {
+  const handleUpdateStartupField = async (field: keyof StartupInteractionData, value: string) => {
     if (!auth.currentUser || !startupData) return;
 
     try {
@@ -660,14 +646,14 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
         const updatedStartupData = { ...startupData.startupData };
         
         if (field === 'email') {
-          updatedStartupData.email = value as string;
+          updatedStartupData.email = value;
         } else if (field === 'website') {
-          updatedStartupData.website = value as string;
+          updatedStartupData.website = value;
         } else if (field === 'linkedin') {
           if (!updatedStartupData.socialLinks) {
             updatedStartupData.socialLinks = {};
           }
-          updatedStartupData.socialLinks.linkedin = value as string;
+          updatedStartupData.socialLinks.linkedin = value;
         }
         
         updateData.startupData = updatedStartupData;
@@ -680,7 +666,7 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
     }
   };
 
-  const handleFieldBlur = (field: keyof StartupInteractionData, value: string | boolean) => {
+  const handleFieldBlur = (field: keyof StartupInteractionData, value: string) => {
     // Persist data when field loses focus
     handleUpdateStartupField(field, value);
   };
@@ -778,157 +764,6 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
     setShowNewMessageModal(true);
   };
 
-  const handleGenerateAIMessage = async () => {
-    if (!auth.currentUser || !startupData || !userData || isGeneratingAI) return;
-
-    setIsGeneratingAI(true);
-
-    try {
-      // Find the best contact for WhatsApp
-      let contactName = '';
-      let contactPhone = '';
-
-      // Priority: founder with WhatsApp, then startup WhatsApp
-      const founderWithWhatsApp = startupData.founders?.find(f => f.whatsapp.trim());
-      if (founderWithWhatsApp) {
-        contactName = founderWithWhatsApp.name;
-        contactPhone = founderWithWhatsApp.whatsapp;
-      } else if (startupData.whatsapp) {
-        contactName = startupData.startupName;
-        contactPhone = startupData.whatsapp;
-      } else {
-        alert('Nenhum número de WhatsApp encontrado para esta startup.');
-        setIsGeneratingAI(false);
-        return;
-      }
-
-      // Prepare AI message generation payload
-      const aiPayload = {
-        message: `Gere uma mensagem comercial personalizada para WhatsApp para a startup ${startupData.startupName}.
-
-Contexto:
-- Startup: ${startupData.startupName}
-- Contato: ${contactName}
-- Telefone: ${contactPhone}
-- Segmento: ${startupData.startupData.category}
-- Vertical: ${startupData.startupData.vertical}
-- Descrição: ${startupData.description}
-- Remetente: ${userData.name}
-- Empresa: ${userData.company}
-- Modo: ${startupData.autoMessaging ? 'auto' : 'manual'}
-
-Gere uma mensagem comercial profissional, personalizada e amigável para estabelecer primeiro contato comercial. A mensagem deve:
-1. Ser direta e objetiva (máximo 2 parágrafos)
-2. Mencionar a Gen.OI como plataforma de inovação aberta
-3. Demonstrar conhecimento sobre o segmento da startup
-4. Propor uma conversa sobre possíveis sinergias
-5. Ter tom profissional mas descontraído
-6. Incluir uma pergunta para engajar resposta
-
-Se o modo for 'auto', envie automaticamente via WhatsApp. Se for 'manual', apenas gere a mensagem para aprovação.`,
-        sessionId: `ai_whatsapp_${startupData.id}_${Date.now()}`,
-        recipient: {
-          name: contactName,
-          phone: contactPhone,
-          type: founderWithWhatsApp ? 'founder' : 'startup'
-        },
-        startup: {
-          id: startupData.id,
-          name: startupData.startupName,
-          category: startupData.startupData.category,
-          vertical: startupData.startupData.vertical
-        },
-        sender: {
-          name: userData.name,
-          company: userData.company,
-          userId: auth.currentUser.uid
-        },
-        messageType: 'ai_generated',
-        autoSend: startupData.autoMessaging
-      };
-
-      try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 45000); // 45 second timeout for AI generation
-
-        const response = await fetch('https://primary-production-2e3b.up.railway.app/webhook-test/genie', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(aiPayload),
-          signal: controller.signal
-        });
-
-        clearTimeout(timeoutId);
-
-        if (!response.ok) {
-          const errorText = await response.text();
-          throw new Error(`Erro do servidor: ${response.status} - ${errorText}`);
-        }
-
-        const data = await response.json();
-        console.log('AI message generated via webhook:', data);
-
-        // Process the AI response
-        if (data[0]?.output) {
-          const aiMessage = data[0].output;
-
-          // Record the AI-generated message in CRM - Create base object with required fields
-          const messageData: any = {
-            startupId: startupData.id,
-            userId: auth.currentUser.uid,
-            type: 'whatsapp',
-            content: aiMessage,
-            sentAt: new Date().toISOString(),
-            recipientType: founderWithWhatsApp ? 'founder' : 'startup',
-            status: startupData.autoMessaging ? 'sent' : 'generated',
-            isAiGenerated: true
-          };
-
-          // Only add optional fields if they have valid values
-          if (contactName) {
-            messageData.recipientName = contactName;
-          }
-          if (contactPhone) {
-            messageData.recipientPhone = contactPhone;
-          }
-
-          const docRef = await addDoc(collection(db, 'crmMessages'), messageData);
-          
-          const newCrmMessage: CRMMessage = {
-            id: docRef.id,
-            ...messageData
-          };
-
-          setCrmMessages(prev => [newCrmMessage, ...prev]);
-
-          if (startupData.autoMessaging) {
-            alert(`Mensagem IA enviada automaticamente!\n\nPara: ${contactPhone}\nContato: ${contactName}\n\nMensagem: ${aiMessage.substring(0, 100)}...`);
-          } else {
-            alert(`Mensagem IA gerada com sucesso!\n\nPara: ${contactName}\nTelefone: ${contactPhone}\n\nVerifique a timeline para revisar antes de enviar.`);
-          }
-        }
-      } catch (error: any) {
-        console.error('AI webhook error:', error);
-        
-        if (error.name === 'AbortError') {
-          throw new Error('Timeout: O serviço de IA não respondeu em tempo hábil. Tente novamente.');
-        } else if (error.message.includes('Failed to fetch')) {
-          throw new Error('Erro de conectividade: Não foi possível conectar ao serviço de IA. Verifique sua conexão com a internet e tente novamente.');
-        } else {
-          throw new Error(`Erro ao gerar mensagem IA: ${error.message}`);
-        }
-      }
-
-    } catch (error: any) {
-      console.error('Error generating AI message:', error);
-      alert(error.message || 'Erro ao gerar mensagem IA. Tente novamente.');
-    } finally {
-      setIsGeneratingAI(false);
-    }
-  };
-
   const handleMessageSent = (newMessage: CRMMessage) => {
     setCrmMessages(prev => [newMessage, ...prev]);
   };
@@ -939,27 +774,6 @@ Se o modo for 'auto', envie automaticamente via WhatsApp. Se for 'manual', apena
     // Check if the last founder has at least a name
     const lastFounder = startupData.founders[startupData.founders.length - 1];
     return lastFounder.name.trim() !== '';
-  };
-
-  const getBestWhatsAppContact = () => {
-    if (!startupData) return null;
-    
-    // Priority: founder with WhatsApp, then startup WhatsApp
-    const founderWithWhatsApp = startupData.founders?.find(f => f.whatsapp.trim());
-    if (founderWithWhatsApp) {
-      return {
-        name: founderWithWhatsApp.name,
-        phone: founderWithWhatsApp.whatsapp,
-        type: 'founder' as const
-      };
-    } else if (startupData.whatsapp) {
-      return {
-        name: startupData.startupName,
-        phone: startupData.whatsapp,
-        type: 'startup' as const
-      };
-    }
-    return null;
   };
 
   if (loading) {
@@ -977,8 +791,6 @@ Se o modo for 'auto', envie automaticamente via WhatsApp. Se for 'manual', apena
       </div>
     );
   }
-
-  const whatsappContact = getBestWhatsAppContact();
 
   return (
     <div className="min-h-screen bg-black">
@@ -998,22 +810,6 @@ Se o modo for 'auto', envie automaticamente via WhatsApp. Se for 'manual', apena
               currentStage={startupData.stage} 
               onStageChange={handleStageChange}
             />
-            
-            {/* Auto messaging toggle */}
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => handleFieldBlur('autoMessaging', !startupData.autoMessaging)}
-                className={`flex items-center gap-1 px-2 py-1 rounded text-xs font-medium transition-colors ${
-                  startupData.autoMessaging
-                    ? 'bg-green-600 hover:bg-green-700 text-white'
-                    : 'bg-gray-600 hover:bg-gray-700 text-gray-300'
-                }`}
-                title={startupData.autoMessaging ? 'Mensagens automáticas ativadas' : 'Mensagens automáticas desativadas'}
-              >
-                {startupData.autoMessaging ? <Bot size={12} /> : <BotOff size={12} />}
-                {startupData.autoMessaging ? 'Auto' : 'Manual'}
-              </button>
-            </div>
           </div>
         </div>
       </div>
@@ -1327,35 +1123,14 @@ Se o modo for 'auto', envie automaticamente via WhatsApp. Se for 'manual', apena
           <div className="p-4 border-b border-gray-700">
             <div className="flex items-center justify-between">
               <h3 className="text-lg font-bold text-white">Timeline de Interações</h3>
-              <div className="flex items-center gap-2">
-                {whatsappContact && (
-                  <button
-                    onClick={handleGenerateAIMessage}
-                    disabled={isGeneratingAI}
-                    className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg text-white font-medium transition-all shadow-lg hover:shadow-xl"
-                  >
-                    {isGeneratingAI ? (
-                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                    ) : (
-                      <Sparkles size={16} />
-                    )}
-                    {isGeneratingAI ? 'Gerando...' : 'Gerar Mensagem IA'}
-                  </button>
-                )}
-                <button
-                  onClick={() => setShowNewMessageModal(true)}
-                  className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg text-white font-medium transition-colors"
-                >
-                  <Plus size={16} />
-                  Nova Mensagem
-                </button>
-              </div>
+              <button
+                onClick={() => setShowNewMessageModal(true)}
+                className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg text-white font-medium transition-colors"
+              >
+                <Plus size={16} />
+                Nova Mensagem
+              </button>
             </div>
-            {whatsappContact && (
-              <div className="mt-2 text-sm text-gray-400">
-                📱 Contato WhatsApp: <strong>{whatsappContact.name}</strong> ({whatsappContact.phone})
-              </div>
-            )}
           </div>
 
           {/* Timeline Content */}
@@ -1385,12 +1160,6 @@ Se o modo for 'auto', envie automaticamente via WhatsApp. Se for 'manual', apena
                             para {message.recipientName}
                           </span>
                         )}
-                        {message.isAiGenerated && (
-                          <span className="text-purple-400 text-xs bg-purple-900/20 px-2 py-1 rounded flex items-center gap-1">
-                            <Sparkles size={12} />
-                            IA
-                          </span>
-                        )}
                         {message.status === 'failed' && (
                           <span className="text-red-400 text-xs bg-red-900/20 px-2 py-1 rounded">
                             Falha no envio
@@ -1404,11 +1173,6 @@ Se o modo for 'auto', envie automaticamente via WhatsApp. Se for 'manual', apena
                         {message.status === 'sent' && message.type === 'whatsapp' && (
                           <span className="text-green-400 text-xs bg-green-900/20 px-2 py-1 rounded">
                             Enviado via WhatsApp
-                          </span>
-                        )}
-                        {message.status === 'generated' && (
-                          <span className="text-yellow-400 text-xs bg-yellow-900/20 px-2 py-1 rounded">
-                            Gerado (não enviado)
                           </span>
                         )}
                         {message.status === 'delivered' && (
