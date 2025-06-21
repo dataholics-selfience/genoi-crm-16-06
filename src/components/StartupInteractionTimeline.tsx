@@ -53,9 +53,11 @@ interface CRMMessage {
   recipientName?: string;
   recipientType: 'startup' | 'founder';
   recipientEmail?: string;
+  recipientPhone?: string;
   subject?: string;
   status?: 'sent' | 'failed' | 'delivered';
   mailersendId?: string;
+  whatsappResponse?: any;
 }
 
 interface StartupInteractionTimelineProps {
@@ -70,6 +72,64 @@ const PIPELINE_STAGES = [
   { id: 'entrevistada', name: 'Entrevistada', color: 'bg-green-200 text-green-800 border-green-300' },
   { id: 'poc', name: 'POC', color: 'bg-orange-200 text-orange-800 border-orange-300' }
 ];
+
+// Função para formatar número de telefone para o padrão internacional
+const formatPhoneNumber = (phone: string): string => {
+  if (!phone) return '';
+  
+  // Remove todos os caracteres não numéricos
+  const cleanPhone = phone.replace(/\D/g, '');
+  
+  // Se já está no formato correto (55 + DDD + número)
+  if (cleanPhone.length === 13 && cleanPhone.startsWith('55')) {
+    return cleanPhone;
+  }
+  
+  // Se tem 11 dígitos (DDD + número)
+  if (cleanPhone.length === 11) {
+    return `55${cleanPhone}`;
+  }
+  
+  // Se tem 10 dígitos (DDD + número sem 9)
+  if (cleanPhone.length === 10) {
+    return `55${cleanPhone.substring(0, 2)}9${cleanPhone.substring(2)}`;
+  }
+  
+  // Se tem 9 dígitos (número sem DDD)
+  if (cleanPhone.length === 9) {
+    return `5511${cleanPhone}`;
+  }
+  
+  // Se tem 8 dígitos (número sem DDD e sem 9)
+  if (cleanPhone.length === 8) {
+    return `55119${cleanPhone}`;
+  }
+  
+  return cleanPhone;
+};
+
+// Função para enviar mensagem via Evolution API
+const sendMessageToWhatsApp = async (number: string, message: string): Promise<any> => {
+  const formattedNumber = formatPhoneNumber(number);
+  
+  const response = await fetch('https://evolution-api-production-f719.up.railway.app/send-message', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      number: formattedNumber,
+      message: message,
+      instance_key: '33B96FBA8E3F-4156-8196-65174145F266'
+    })
+  });
+
+  if (!response.ok) {
+    throw new Error(`HTTP error! status: ${response.status}`);
+  }
+
+  return await response.json();
+};
 
 const NewMessageModal = ({ 
   isOpen, 
@@ -87,9 +147,12 @@ const NewMessageModal = ({
   const [selectedRecipient, setSelectedRecipient] = useState('');
   const [selectedRecipientType, setSelectedRecipientType] = useState<'startup' | 'founder'>('startup');
   const [selectedRecipientEmail, setSelectedRecipientEmail] = useState('');
+  const [selectedRecipientPhone, setSelectedRecipientPhone] = useState('');
   const [emailSubject, setEmailSubject] = useState('');
   const [isSending, setIsSending] = useState(false);
   const [userCompany, setUserCompany] = useState('');
+  const [showAddWhatsApp, setShowAddWhatsApp] = useState(false);
+  const [newWhatsAppNumber, setNewWhatsAppNumber] = useState('');
 
   useEffect(() => {
     const fetchUserData = async () => {
@@ -114,21 +177,59 @@ const NewMessageModal = ({
       setEmailSubject('');
       setSelectedRecipient('');
       setSelectedRecipientEmail('');
+      setSelectedRecipientPhone('');
       setMessageType('email');
+      setShowAddWhatsApp(false);
+      setNewWhatsAppNumber('');
     }
   }, [isOpen]);
 
   const handleRecipientChange = (value: string) => {
     setSelectedRecipient(value);
+    setShowAddWhatsApp(false);
     
     if (value === startupData?.startupName) {
       setSelectedRecipientType('startup');
       setSelectedRecipientEmail(startupData.email);
+      setSelectedRecipientPhone(startupData.whatsapp);
     } else {
       setSelectedRecipientType('founder');
       const founder = startupData.founders?.find(f => f.name === value);
       setSelectedRecipientEmail(founder?.email || '');
+      setSelectedRecipientPhone(founder?.whatsapp || '');
     }
+  };
+
+  const handleAddWhatsApp = async () => {
+    if (!newWhatsAppNumber.trim()) return;
+
+    const formattedNumber = formatPhoneNumber(newWhatsAppNumber);
+    
+    if (selectedRecipientType === 'startup') {
+      // Update startup WhatsApp
+      await updateDoc(doc(db, 'selectedStartups', startupData.id), {
+        whatsapp: formattedNumber,
+        updatedAt: new Date().toISOString()
+      });
+      setSelectedRecipientPhone(formattedNumber);
+    } else {
+      // Update founder WhatsApp
+      const founder = startupData.founders?.find(f => f.name === selectedRecipient);
+      if (founder) {
+        const updatedFounders = startupData.founders.map(f =>
+          f.id === founder.id ? { ...f, whatsapp: formattedNumber } : f
+        );
+        
+        await updateDoc(doc(db, 'selectedStartups', startupData.id), {
+          founders: updatedFounders,
+          updatedAt: new Date().toISOString()
+        });
+        setSelectedRecipientPhone(formattedNumber);
+      }
+    }
+    
+    setShowAddWhatsApp(false);
+    setNewWhatsAppNumber('');
   };
 
   const handleSendMessage = async () => {
@@ -137,8 +238,11 @@ const NewMessageModal = ({
     setIsSending(true);
 
     try {
-      // Validações específicas para email
+      let messageStatus = 'sent';
+      let whatsappResponse = null;
+
       if (messageType === 'email') {
+        // Validações específicas para email
         if (!emailSubject.trim()) {
           setIsSending(false);
           return;
@@ -222,6 +326,26 @@ const NewMessageModal = ({
             timestamp: new Date().toISOString()
           }
         });
+      } else {
+        // WhatsApp - verificar se tem número
+        if (!selectedRecipientPhone) {
+          setShowAddWhatsApp(true);
+          setIsSending(false);
+          return;
+        }
+
+        try {
+          // Enviar mensagem via Evolution API
+          whatsappResponse = await sendMessageToWhatsApp(selectedRecipientPhone, newMessage);
+          
+          if (!whatsappResponse.success) {
+            messageStatus = 'failed';
+          }
+        } catch (error) {
+          console.error('Error sending WhatsApp:', error);
+          messageStatus = 'failed';
+          whatsappResponse = { error: error.message };
+        }
       }
 
       // Registrar a mensagem no CRM
@@ -234,8 +358,10 @@ const NewMessageModal = ({
         recipientName: selectedRecipient,
         recipientType: selectedRecipientType,
         recipientEmail: messageType === 'email' ? selectedRecipientEmail : undefined,
+        recipientPhone: messageType === 'whatsapp' ? selectedRecipientPhone : undefined,
         subject: messageType === 'email' ? `A ${userCompany} deseja contatar a ${startupData.startupName} - ${emailSubject}` : undefined,
-        status: 'sent'
+        status: messageStatus,
+        whatsappResponse: messageType === 'whatsapp' ? whatsappResponse : undefined
       };
 
       const docRef = await addDoc(collection(db, 'crmMessages'), messageData);
@@ -252,6 +378,7 @@ const NewMessageModal = ({
       setEmailSubject('');
       setSelectedRecipient('');
       setSelectedRecipientEmail('');
+      setSelectedRecipientPhone('');
       onClose();
 
     } catch (error: any) {
@@ -262,6 +389,27 @@ const NewMessageModal = ({
   };
 
   if (!isOpen) return null;
+
+  // Filtrar contatos disponíveis baseado no tipo de mensagem
+  const availableContacts = [];
+  
+  // Adicionar startup se tiver o contato necessário
+  if (messageType === 'email' && startupData.email) {
+    availableContacts.push({ name: startupData.startupName, type: 'startup' });
+  } else if (messageType === 'whatsapp' && startupData.whatsapp) {
+    availableContacts.push({ name: startupData.startupName, type: 'startup' });
+  }
+
+  // Adicionar fundadores que têm o contato necessário
+  startupData.founders?.forEach(founder => {
+    if (founder.name.trim()) {
+      if (messageType === 'email' && founder.email.trim()) {
+        availableContacts.push({ name: founder.name, type: 'founder' });
+      } else if (messageType === 'whatsapp' && founder.whatsapp.trim()) {
+        availableContacts.push({ name: founder.name, type: 'founder' });
+      }
+    }
+  });
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
@@ -280,7 +428,13 @@ const NewMessageModal = ({
           <div className="flex gap-2">
             <select
               value={messageType}
-              onChange={(e) => setMessageType(e.target.value as 'email' | 'whatsapp')}
+              onChange={(e) => {
+                setMessageType(e.target.value as 'email' | 'whatsapp');
+                setSelectedRecipient('');
+                setSelectedRecipientEmail('');
+                setSelectedRecipientPhone('');
+                setShowAddWhatsApp(false);
+              }}
               className="px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
               <option value="email">Email</option>
@@ -293,18 +447,71 @@ const NewMessageModal = ({
               className="flex-1 px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
               <option value="">Selecione o destinatário</option>
-              {startupData.email && (
-                <option value={startupData.startupName}>{startupData.startupName} (Geral)</option>
-              )}
-              {startupData.founders?.filter(founder => founder.name.trim() && (messageType === 'whatsapp' || founder.email.trim())).map((founder) => (
-                <option key={founder.id} value={founder.name}>
-                  {founder.name} {founder.cargo && `(${founder.cargo})`}
+              {availableContacts.map((contact, index) => (
+                <option key={index} value={contact.name}>
+                  {contact.name} {contact.type === 'startup' ? '(Geral)' : '(Fundador)'}
                 </option>
               ))}
             </select>
           </div>
 
-          {messageType === 'email' && (
+          {/* Mostrar contatos sem WhatsApp quando necessário */}
+          {messageType === 'whatsapp' && availableContacts.length === 0 && (
+            <div className="bg-yellow-900/20 border border-yellow-600 rounded p-3">
+              <p className="text-yellow-400 text-sm mb-2">
+                Nenhum contato tem WhatsApp cadastrado. Selecione um contato para adicionar:
+              </p>
+              <select
+                value={selectedRecipient}
+                onChange={(e) => {
+                  setSelectedRecipient(e.target.value);
+                  if (e.target.value) {
+                    setShowAddWhatsApp(true);
+                  }
+                }}
+                className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="">Selecione para adicionar WhatsApp</option>
+                {startupData.email && (
+                  <option value={startupData.startupName}>{startupData.startupName} (Geral)</option>
+                )}
+                {startupData.founders?.filter(f => f.name.trim()).map((founder) => (
+                  <option key={founder.id} value={founder.name}>
+                    {founder.name} {founder.cargo && `(${founder.cargo})`}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {/* Campo para adicionar WhatsApp */}
+          {showAddWhatsApp && (
+            <div className="bg-blue-900/20 border border-blue-600 rounded p-3">
+              <p className="text-blue-400 text-sm mb-2">
+                Adicionar WhatsApp para {selectedRecipient}:
+              </p>
+              <div className="flex gap-2">
+                <input
+                  type="tel"
+                  value={newWhatsAppNumber}
+                  onChange={(e) => setNewWhatsAppNumber(e.target.value)}
+                  placeholder="(11) 99999-9999"
+                  className="flex-1 px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                <button
+                  onClick={handleAddWhatsApp}
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded text-white"
+                >
+                  Adicionar WhatsApp
+                </button>
+              </div>
+              <p className="text-xs text-gray-400 mt-1">
+                Será formatado automaticamente para: {formatPhoneNumber(newWhatsAppNumber)}
+              </p>
+            </div>
+          )}
+
+          {messageType === 'email' && selectedRecipient && (
             <div>
               <label className="block text-sm text-gray-300 mb-1">Assunto do Email *</label>
               <div className="text-xs text-gray-400 mb-2">
@@ -318,6 +525,12 @@ const NewMessageModal = ({
                 className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                 required
               />
+            </div>
+          )}
+
+          {messageType === 'whatsapp' && selectedRecipientPhone && (
+            <div className="text-sm text-gray-400 bg-gray-700 p-2 rounded">
+              📱 Será enviado para: <strong>{selectedRecipientPhone}</strong>
             </div>
           )}
 
@@ -337,7 +550,7 @@ const NewMessageModal = ({
           <div className="flex gap-2">
             <button
               onClick={handleSendMessage}
-              disabled={!newMessage.trim() || !selectedRecipient || isSending || (messageType === 'email' && (!emailSubject.trim() || !selectedRecipientEmail))}
+              disabled={!newMessage.trim() || !selectedRecipient || isSending || (messageType === 'email' && (!emailSubject.trim() || !selectedRecipientEmail)) || (messageType === 'whatsapp' && !selectedRecipientPhone)}
               className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg text-white font-medium"
             >
               {isSending ? (
@@ -345,7 +558,7 @@ const NewMessageModal = ({
               ) : (
                 <Send size={16} />
               )}
-              {isSending ? 'Enviando...' : messageType === 'email' ? 'Enviar Email' : 'Registrar WhatsApp'}
+              {isSending ? 'Enviando...' : messageType === 'email' ? 'Enviar Email' : 'Enviar WhatsApp'}
             </button>
             <button
               onClick={onClose}
@@ -591,6 +804,10 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
   };
 
   const handleFounderFieldBlur = (founderId: string, field: keyof FounderData, value: string) => {
+    // Format phone number if it's the whatsapp field
+    if (field === 'whatsapp' && value) {
+      value = formatPhoneNumber(value);
+    }
     // Persist founder data when field loses focus
     handleUpdateFounder(founderId, field, value);
   };
@@ -721,7 +938,7 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
                       type="tel"
                       value={startupData.whatsapp}
                       onChange={(e) => setStartupData(prev => prev ? { ...prev, whatsapp: e.target.value } : null)}
-                      onBlur={(e) => handleFieldBlur('whatsapp', e.target.value)}
+                      onBlur={(e) => handleFieldBlur('whatsapp', formatPhoneNumber(e.target.value))}
                       className="flex-1 px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                       placeholder="+55 11 99999-9999"
                     />
@@ -735,6 +952,11 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
                       </button>
                     )}
                   </div>
+                  {startupData.whatsapp && (
+                    <div className="text-xs text-gray-400 mt-1">
+                      Formato: {formatPhoneNumber(startupData.whatsapp)}
+                    </div>
+                  )}
                 </div>
 
                 <div>
@@ -910,6 +1132,11 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
                             </button>
                           )}
                         </div>
+                        {founder.whatsapp && (
+                          <div className="text-xs text-gray-500 mt-1">
+                            {formatPhoneNumber(founder.whatsapp)}
+                          </div>
+                        )}
                       </div>
 
                       <div>
@@ -1028,6 +1255,11 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
                             Enviado via Genoi.net
                           </span>
                         )}
+                        {message.status === 'sent' && message.type === 'whatsapp' && (
+                          <span className="text-green-400 text-xs bg-green-900/20 px-2 py-1 rounded">
+                            Enviado via WhatsApp
+                          </span>
+                        )}
                         {message.status === 'delivered' && (
                           <span className="text-blue-400 text-xs bg-blue-900/20 px-2 py-1 rounded">
                             Entregue
@@ -1048,10 +1280,15 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
                         📧 {message.recipientEmail}
                       </div>
                     )}
+                    {message.recipientPhone && (
+                      <div className="text-gray-400 text-sm mb-2">
+                        📱 {message.recipientPhone}
+                      </div>
+                    )}
                     <p className="text-gray-300 whitespace-pre-wrap">{message.content}</p>
-                    {message.mailersendId && (
-                      <div className="text-xs text-gray-500 mt-2">
-                        ID: {message.mailersendId}
+                    {message.whatsappResponse && (
+                      <div className="text-xs text-gray-500 mt-2 bg-gray-700 p-2 rounded">
+                        <strong>Resposta da API:</strong> {JSON.stringify(message.whatsappResponse, null, 2)}
                       </div>
                     )}
                   </div>
