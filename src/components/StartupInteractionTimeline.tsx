@@ -141,78 +141,8 @@ const NewMessageModal = ({
     setIsSending(true);
 
     try {
-      if (messageType === 'whatsapp') {
-        // Validações específicas para WhatsApp
-        if (!selectedRecipientPhone) {
-          alert('Número de WhatsApp do destinatário não encontrado.');
-          setIsSending(false);
-          return;
-        }
-
-        // Enviar mensagem via webhook do n8n
-        const whatsappPayload = {
-          message: newMessage.trim(),
-          sessionId: `whatsapp_${startupData.id}_${Date.now()}`,
-          recipient: {
-            name: selectedRecipient,
-            phone: selectedRecipientPhone,
-            type: selectedRecipientType
-          },
-          startup: {
-            id: startupData.id,
-            name: startupData.startupName
-          },
-          sender: {
-            name: senderName,
-            userId: auth.currentUser.uid
-          },
-          messageType: 'manual',
-          instanceKey: '33B96FBA8E3F-4156-8196-65174145F266'
-        };
-
-        console.log('Sending WhatsApp message via webhook:', whatsappPayload);
-
-        // Create AbortController for timeout
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
-
-        try {
-          const response = await fetch('https://primary-production-2e3b.up.railway.app/webhook-test/genie', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify(whatsappPayload),
-            signal: controller.signal
-          });
-
-          clearTimeout(timeoutId);
-
-          if (!response.ok) {
-            const errorText = await response.text();
-            console.error('WhatsApp webhook error:', errorText);
-            throw new Error(`Erro do servidor: ${response.status} - ${errorText}`);
-          }
-
-          const result = await response.json();
-          console.log('WhatsApp webhook response:', result);
-
-          alert(`Mensagem WhatsApp enviada com sucesso!\n\nPara: ${selectedRecipientPhone}\nDestinatário: ${selectedRecipient}\n\nA mensagem foi processada pelo agente IA.`);
-
-        } catch (error: any) {
-          console.error('Error sending WhatsApp message:', error);
-          
-          if (error.name === 'AbortError') {
-            throw new Error('Timeout: A requisição demorou mais de 30 segundos. Verifique sua conexão e tente novamente.');
-          } else if (error.message.includes('Failed to fetch')) {
-            throw new Error('Erro de conectividade: Não foi possível conectar ao serviço de WhatsApp. Verifique sua internet e tente novamente.');
-          } else {
-            throw error;
-          }
-        }
-
-      } else if (messageType === 'email') {
-        // Validações específicas para email
+      // Validações específicas para cada tipo de mensagem
+      if (messageType === 'email') {
         if (!emailSubject.trim()) {
           alert('Por favor, preencha o assunto do email.');
           setIsSending(false);
@@ -300,6 +230,53 @@ const NewMessageModal = ({
         });
 
         console.log('Email document created with ID:', emailDoc.id);
+      } else if (messageType === 'whatsapp') {
+        // Validações para WhatsApp
+        if (!selectedRecipientPhone) {
+          alert('Número de WhatsApp do destinatário não encontrado.');
+          setIsSending(false);
+          return;
+        }
+
+        // Enviar mensagem WhatsApp via webhook
+        const whatsappPayload = {
+          message: newMessage.trim(),
+          sessionId: `whatsapp_${startupData.id}_${Date.now()}`,
+          recipient: {
+            name: selectedRecipient,
+            phone: selectedRecipientPhone,
+            type: selectedRecipientType
+          },
+          startup: {
+            id: startupData.id,
+            name: startupData.startupName
+          },
+          sender: {
+            name: senderName,
+            userId: auth.currentUser.uid
+          },
+          messageType: 'manual',
+          instanceKey: '33B96FBA8E3F-4156-8196-65174145F266'
+        };
+
+        console.log('Sending WhatsApp message:', whatsappPayload);
+
+        const whatsappResponse = await fetch('https://primary-production-2e3b.up.railway.app/webhook-test/genie', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(whatsappPayload),
+        });
+
+        if (!whatsappResponse.ok) {
+          const errorText = await whatsappResponse.text();
+          console.error('WhatsApp webhook error:', errorText);
+          throw new Error(`Erro no webhook WhatsApp: ${whatsappResponse.status} - ${errorText}`);
+        }
+
+        const whatsappResult = await whatsappResponse.json();
+        console.log('WhatsApp webhook response:', whatsappResult);
       }
 
       // Registrar a mensagem no CRM
@@ -334,9 +311,11 @@ const NewMessageModal = ({
       setSelectedRecipientPhone('');
       onClose();
 
-      // Show success message for email
+      // Show success message
       if (messageType === 'email') {
         alert(`Email enviado com sucesso!\n\nDe: contact@genoi.com.br\nPara: ${selectedRecipientEmail}\nAssunto: ${emailSubject}\n\nO email será processado pela extensão MailerSend.`);
+      } else {
+        alert(`Mensagem WhatsApp enviada com sucesso!\n\nPara: ${selectedRecipientPhone}\nDestinatário: ${selectedRecipient}\n\nMensagem enviada via Evolution API.`);
       }
 
     } catch (error: any) {
@@ -344,12 +323,20 @@ const NewMessageModal = ({
       
       let errorMessage = 'Erro ao enviar mensagem. Tente novamente.';
       
-      if (error.message) {
-        errorMessage = error.message;
-      } else if (error.code === 'permission-denied') {
-        errorMessage = 'Permissão negada. Verifique se a extensão MailerSend está instalada e configurada corretamente.';
-      } else if (error.code === 'not-found') {
-        errorMessage = 'Coleção "emails" não encontrada. Verifique se a extensão MailerSend está instalada.';
+      if (messageType === 'email') {
+        if (error.code === 'permission-denied') {
+          errorMessage = 'Permissão negada. Verifique se a extensão MailerSend está instalada e configurada corretamente.';
+        } else if (error.code === 'not-found') {
+          errorMessage = 'Coleção "emails" não encontrada. Verifique se a extensão MailerSend está instalada.';
+        } else if (error.message) {
+          errorMessage = `Erro no email: ${error.message}`;
+        }
+      } else if (messageType === 'whatsapp') {
+        if (error.message.includes('Failed to fetch')) {
+          errorMessage = 'Erro de conexão com o webhook WhatsApp. Verifique sua internet e tente novamente.';
+        } else if (error.message) {
+          errorMessage = `Erro no WhatsApp: ${error.message}`;
+        }
       }
       
       alert(errorMessage);
@@ -390,16 +377,15 @@ const NewMessageModal = ({
               className="flex-1 px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
               <option value="">Selecione o destinatário</option>
-              {startupData.email && messageType === 'email' && (
+              {messageType === 'email' && startupData.email && (
                 <option value={startupData.startupName}>{startupData.startupName} (Geral)</option>
               )}
-              {startupData.whatsapp && messageType === 'whatsapp' && (
+              {messageType === 'whatsapp' && startupData.whatsapp && (
                 <option value={startupData.startupName}>{startupData.startupName} (Geral)</option>
               )}
               {startupData.founders?.filter(founder => 
                 founder.name.trim() && (
-                  (messageType === 'email' && founder.email.trim()) ||
-                  (messageType === 'whatsapp' && founder.whatsapp.trim())
+                  messageType === 'email' ? founder.email.trim() : founder.whatsapp.trim()
                 )
               ).map((founder) => (
                 <option key={founder.id} value={founder.name}>
@@ -465,11 +451,10 @@ const NewMessageModal = ({
             <div className="text-xs text-gray-400 bg-gray-700 p-3 rounded">
               <strong>ℹ️ Configuração do WhatsApp:</strong>
               <ul className="mt-1 space-y-1">
-                <li>• <strong>Remetente:</strong> {senderName} (Gen.OI)</li>
-                <li>• <strong>Processamento:</strong> Agente IA via n8n + Evolution API</li>
-                <li>• <strong>Instância:</strong> 33B96FBA8E3F-4156-8196-65174145F266</li>
-                <li>• <strong>Modo:</strong> Manual (enviado imediatamente)</li>
-                <li>• A mensagem será enviada via webhook do agente IA</li>
+                <li>• <strong>Webhook:</strong> https://primary-production-2e3b.up.railway.app/webhook-test/genie</li>
+                <li>• <strong>Instância Evolution API:</strong> 33B96FBA8E3F-4156-8196-65174145F266</li>
+                <li>• <strong>Remetente:</strong> {senderName}</li>
+                <li>• A mensagem será enviada via Evolution API integrada ao n8n</li>
               </ul>
             </div>
           )}
@@ -479,7 +464,8 @@ const NewMessageModal = ({
               onClick={handleSendMessage}
               disabled={!newMessage.trim() || !selectedRecipient || isSending || 
                 (messageType === 'email' && (!emailSubject.trim() || !selectedRecipientEmail)) ||
-                (messageType === 'whatsapp' && !selectedRecipientPhone)}
+                (messageType === 'whatsapp' && !selectedRecipientPhone)
+              }
               className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg text-white font-medium"
             >
               {isSending ? (
@@ -1172,7 +1158,7 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
                         )}
                         {message.status === 'sent' && message.type === 'whatsapp' && (
                           <span className="text-green-400 text-xs bg-green-900/20 px-2 py-1 rounded">
-                            Enviado via WhatsApp
+                            Enviado via Evolution API
                           </span>
                         )}
                         {message.status === 'delivered' && (
