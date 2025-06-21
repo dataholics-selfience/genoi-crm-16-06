@@ -57,6 +57,7 @@ interface CRMMessage {
   subject?: string;
   status?: 'sent' | 'failed' | 'delivered';
   mailersendId?: string;
+  evolutionApiResponse?: any;
 }
 
 interface StartupInteractionTimelineProps {
@@ -71,6 +72,12 @@ const PIPELINE_STAGES = [
   { id: 'entrevistada', name: 'Entrevistada', color: 'bg-green-200 text-green-800 border-green-300' },
   { id: 'poc', name: 'POC', color: 'bg-orange-200 text-orange-800 border-orange-300' }
 ];
+
+// Evolution API Configuration
+const EVOLUTION_API_CONFIG = {
+  baseUrl: 'https://evolution-api-production-f719.up.railway.app',
+  instanceKey: '33B96FBA8E3F-4156-8196-65174145F266'
+};
 
 const NewMessageModal = ({ 
   isOpen, 
@@ -135,12 +142,101 @@ const NewMessageModal = ({
     }
   };
 
+  const formatPhoneNumber = (phone: string): string => {
+    // Remove all non-numeric characters
+    const cleaned = phone.replace(/\D/g, '');
+    
+    // If it doesn't start with 55 (Brazil country code), add it
+    if (!cleaned.startsWith('55')) {
+      return `55${cleaned}`;
+    }
+    
+    return cleaned;
+  };
+
+  const sendWhatsAppMessage = async (message: string, recipientPhone: string, recipientName: string) => {
+    const formattedPhone = formatPhoneNumber(recipientPhone);
+    
+    // Evolution API endpoint - instanceKey goes in the URL path
+    const evolutionApiUrl = `${EVOLUTION_API_CONFIG.baseUrl}/message/sendText/${EVOLUTION_API_CONFIG.instanceKey}`;
+    
+    // Request payload - NO instanceKey in the body, only receiver and message
+    const evolutionPayload = {
+      receiver: formattedPhone,
+      message: message.trim()
+    };
+
+    console.log('🔄 Sending WhatsApp message via Evolution API:');
+    console.log('📍 URL:', evolutionApiUrl);
+    console.log('📦 Payload:', JSON.stringify(evolutionPayload, null, 2));
+    console.log('📱 Formatted Phone:', formattedPhone);
+    console.log('🔑 Instance Key (in URL):', EVOLUTION_API_CONFIG.instanceKey);
+
+    try {
+      const response = await fetch(evolutionApiUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(evolutionPayload)
+      });
+
+      console.log('📡 Evolution API Response Status:', response.status);
+      console.log('📡 Evolution API Response Headers:', Object.fromEntries(response.headers.entries()));
+
+      const responseText = await response.text();
+      console.log('📡 Evolution API Response Body (raw):', responseText);
+
+      let responseData;
+      try {
+        responseData = JSON.parse(responseText);
+        console.log('📡 Evolution API Response Body (parsed):', responseData);
+      } catch (parseError) {
+        console.error('❌ Failed to parse Evolution API response as JSON:', parseError);
+        responseData = { rawResponse: responseText };
+      }
+
+      if (!response.ok) {
+        console.error('❌ Evolution API Error Response:', {
+          status: response.status,
+          statusText: response.statusText,
+          body: responseData
+        });
+        
+        let errorMessage = `Evolution API Error (${response.status})`;
+        if (response.status === 404) {
+          errorMessage += ': Instance not found. Please verify the instanceKey is correct.';
+        } else if (responseData?.message) {
+          errorMessage += `: ${responseData.message}`;
+        } else if (responseText) {
+          errorMessage += `: ${responseText}`;
+        }
+        
+        throw new Error(errorMessage);
+      }
+
+      console.log('✅ WhatsApp message sent successfully via Evolution API');
+      return responseData;
+
+    } catch (error) {
+      console.error('❌ Evolution API Request Failed:', error);
+      
+      if (error instanceof TypeError && error.message.includes('fetch')) {
+        throw new Error('Network error: Unable to connect to Evolution API. Please check your internet connection.');
+      }
+      
+      throw error;
+    }
+  };
+
   const handleSendMessage = async () => {
     if (!auth.currentUser || !startupData || !newMessage.trim() || !selectedRecipient) return;
 
     setIsSending(true);
 
     try {
+      let evolutionApiResponse = null;
+
       // Validações específicas para cada tipo de mensagem
       if (messageType === 'email') {
         if (!emailSubject.trim()) {
@@ -199,7 +295,7 @@ const NewMessageModal = ({
           </html>
         `;
 
-        // Enviar email usando a extensão oficial do MailerSend com domínios corretos
+        // Enviar email usando a extensão oficial do MailerSend
         const emailDoc = await addDoc(collection(db, 'emails'), {
           to: [
             {
@@ -208,18 +304,17 @@ const NewMessageModal = ({
             }
           ],
           from: {
-            email: 'contact@genoi.com.br',  // Usando o domínio validado
+            email: 'contact@genoi.com.br',
             name: 'Gen.OI - Inovação Aberta'
           },
           subject: emailSubject,
           html: htmlContent,
           text: newMessage.trim(),
           reply_to: {
-            email: 'contact@genoi.net',  // Responder para genoi.net conforme solicitado
+            email: 'contact@genoi.net',
             name: 'Gen.OI - Suporte'
           },
           tags: ['crm', 'startup-interaction'],
-          // Metadados para rastreamento
           metadata: {
             startupId: startupData.id,
             userId: auth.currentUser.uid,
@@ -230,53 +325,20 @@ const NewMessageModal = ({
         });
 
         console.log('Email document created with ID:', emailDoc.id);
+
       } else if (messageType === 'whatsapp') {
-        // Validações para WhatsApp
         if (!selectedRecipientPhone) {
           alert('Número de WhatsApp do destinatário não encontrado.');
           setIsSending(false);
           return;
         }
 
-        // Enviar mensagem WhatsApp via webhook
-        const whatsappPayload = {
-          message: newMessage.trim(),
-          sessionId: `whatsapp_${startupData.id}_${Date.now()}`,
-          recipient: {
-            name: selectedRecipient,
-            phone: selectedRecipientPhone,
-            type: selectedRecipientType
-          },
-          startup: {
-            id: startupData.id,
-            name: startupData.startupName
-          },
-          sender: {
-            name: senderName,
-            userId: auth.currentUser.uid
-          },
-          messageType: 'manual',
-          instanceKey: '33B96FBA8E3F-4156-8196-65174145F266'
-        };
-
-        console.log('Sending WhatsApp message:', whatsappPayload);
-
-        const whatsappResponse = await fetch('https://primary-production-2e3b.up.railway.app/webhook-test/genie', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(whatsappPayload),
-        });
-
-        if (!whatsappResponse.ok) {
-          const errorText = await whatsappResponse.text();
-          console.error('WhatsApp webhook error:', errorText);
-          throw new Error(`Erro no webhook WhatsApp: ${whatsappResponse.status} - ${errorText}`);
-        }
-
-        const whatsappResult = await whatsappResponse.json();
-        console.log('WhatsApp webhook response:', whatsappResult);
+        // Send WhatsApp message via Evolution API
+        evolutionApiResponse = await sendWhatsAppMessage(
+          newMessage,
+          selectedRecipientPhone,
+          selectedRecipient
+        );
       }
 
       // Registrar a mensagem no CRM
@@ -291,7 +353,8 @@ const NewMessageModal = ({
         recipientEmail: messageType === 'email' ? selectedRecipientEmail : undefined,
         recipientPhone: messageType === 'whatsapp' ? selectedRecipientPhone : undefined,
         subject: messageType === 'email' ? emailSubject : undefined,
-        status: 'sent'
+        status: 'sent',
+        evolutionApiResponse: messageType === 'whatsapp' ? evolutionApiResponse : undefined
       };
 
       const docRef = await addDoc(collection(db, 'crmMessages'), messageData);
@@ -315,7 +378,7 @@ const NewMessageModal = ({
       if (messageType === 'email') {
         alert(`Email enviado com sucesso!\n\nDe: contact@genoi.com.br\nPara: ${selectedRecipientEmail}\nAssunto: ${emailSubject}\n\nO email será processado pela extensão MailerSend.`);
       } else {
-        alert(`Mensagem WhatsApp enviada com sucesso!\n\nPara: ${selectedRecipientPhone}\nDestinatário: ${selectedRecipient}\n\nMensagem enviada via Evolution API.`);
+        alert(`WhatsApp enviado com sucesso!\n\nPara: ${selectedRecipientPhone}\nMensagem: ${newMessage.substring(0, 50)}${newMessage.length > 50 ? '...' : ''}\n\nEnviado via Evolution API.`);
       }
 
     } catch (error: any) {
@@ -328,15 +391,19 @@ const NewMessageModal = ({
           errorMessage = 'Permissão negada. Verifique se a extensão MailerSend está instalada e configurada corretamente.';
         } else if (error.code === 'not-found') {
           errorMessage = 'Coleção "emails" não encontrada. Verifique se a extensão MailerSend está instalada.';
-        } else if (error.message) {
-          errorMessage = `Erro no email: ${error.message}`;
         }
       } else if (messageType === 'whatsapp') {
-        if (error.message.includes('Failed to fetch')) {
-          errorMessage = 'Erro de conexão com o webhook WhatsApp. Verifique sua internet e tente novamente.';
+        if (error.message.includes('404')) {
+          errorMessage = `Erro 404: Instância Evolution API não encontrada.\n\nDetalhes técnicos:\n- Instance Key: ${EVOLUTION_API_CONFIG.instanceKey}\n- URL: ${EVOLUTION_API_CONFIG.baseUrl}\n\nVerifique se a instância está ativa no painel Evolution API.`;
+        } else if (error.message.includes('Network error')) {
+          errorMessage = 'Erro de rede: Não foi possível conectar à Evolution API. Verifique sua conexão com a internet.';
         } else if (error.message) {
-          errorMessage = `Erro no WhatsApp: ${error.message}`;
+          errorMessage = `Erro Evolution API: ${error.message}`;
         }
+      }
+      
+      if (error.message) {
+        errorMessage += `\n\nDetalhes: ${error.message}`;
       }
       
       alert(errorMessage);
@@ -377,15 +444,16 @@ const NewMessageModal = ({
               className="flex-1 px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
               <option value="">Selecione o destinatário</option>
-              {messageType === 'email' && startupData.email && (
+              {startupData.email && messageType === 'email' && (
                 <option value={startupData.startupName}>{startupData.startupName} (Geral)</option>
               )}
-              {messageType === 'whatsapp' && startupData.whatsapp && (
+              {startupData.whatsapp && messageType === 'whatsapp' && (
                 <option value={startupData.startupName}>{startupData.startupName} (Geral)</option>
               )}
               {startupData.founders?.filter(founder => 
                 founder.name.trim() && (
-                  messageType === 'email' ? founder.email.trim() : founder.whatsapp.trim()
+                  (messageType === 'email' && founder.email.trim()) ||
+                  (messageType === 'whatsapp' && founder.whatsapp.trim())
                 )
               ).map((founder) => (
                 <option key={founder.id} value={founder.name}>
@@ -418,6 +486,8 @@ const NewMessageModal = ({
           {selectedRecipientPhone && messageType === 'whatsapp' && (
             <div className="text-sm text-gray-400 bg-gray-700 p-2 rounded">
               📱 Será enviado para: <strong>{selectedRecipientPhone}</strong>
+              <br />
+              <span className="text-xs">Formatado: <strong>{formatPhoneNumber(selectedRecipientPhone)}</strong></span>
             </div>
           )}
 
@@ -451,10 +521,11 @@ const NewMessageModal = ({
             <div className="text-xs text-gray-400 bg-gray-700 p-3 rounded">
               <strong>ℹ️ Configuração do WhatsApp:</strong>
               <ul className="mt-1 space-y-1">
-                <li>• <strong>Webhook:</strong> https://primary-production-2e3b.up.railway.app/webhook-test/genie</li>
-                <li>• <strong>Instância Evolution API:</strong> 33B96FBA8E3F-4156-8196-65174145F266</li>
-                <li>• <strong>Remetente:</strong> {senderName}</li>
-                <li>• A mensagem será enviada via Evolution API integrada ao n8n</li>
+                <li>• <strong>API:</strong> Evolution API</li>
+                <li>• <strong>Endpoint:</strong> {EVOLUTION_API_CONFIG.baseUrl}</li>
+                <li>• <strong>Instance Key:</strong> {EVOLUTION_API_CONFIG.instanceKey}</li>
+                <li>• <strong>Método:</strong> POST /message/sendText/{'{instanceKey}'}</li>
+                <li>• O número será formatado automaticamente com código do país (+55)</li>
               </ul>
             </div>
           )}
@@ -462,7 +533,10 @@ const NewMessageModal = ({
           <div className="flex gap-2">
             <button
               onClick={handleSendMessage}
-              disabled={!newMessage.trim() || !selectedRecipient || isSending || 
+              disabled={
+                !newMessage.trim() || 
+                !selectedRecipient || 
+                isSending || 
                 (messageType === 'email' && (!emailSubject.trim() || !selectedRecipientEmail)) ||
                 (messageType === 'whatsapp' && !selectedRecipientPhone)
               }
@@ -1189,7 +1263,17 @@ const StartupInteractionTimeline = ({ startupId, onBack }: StartupInteractionTim
                     <p className="text-gray-300 whitespace-pre-wrap">{message.content}</p>
                     {message.mailersendId && (
                       <div className="text-xs text-gray-500 mt-2">
-                        ID: {message.mailersendId}
+                        MailerSend ID: {message.mailersendId}
+                      </div>
+                    )}
+                    {message.evolutionApiResponse && (
+                      <div className="text-xs text-gray-500 mt-2">
+                        <details>
+                          <summary className="cursor-pointer">Evolution API Response</summary>
+                          <pre className="mt-1 text-xs bg-gray-900 p-2 rounded overflow-auto">
+                            {JSON.stringify(message.evolutionApiResponse, null, 2)}
+                          </pre>
+                        </details>
                       </div>
                     )}
                   </div>
